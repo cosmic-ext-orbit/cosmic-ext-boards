@@ -1,26 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use cosmic::app::context_drawer::{self, ContextDrawer};
+use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::prelude::*;
 use cosmic::widget::{self, about::About, menu, nav_bar};
 
 use crate::boards::{Board, Boards, Id, Message as BoardMessage, NameTarget, Page, Store};
+use crate::config::Config;
 use crate::fl;
+use crate::settings;
 
 pub struct AppModel {
     core: cosmic::Core,
     about: About,
-    show_about: bool,
+    drawer: Option<AppDrawer>,
+    config: Config,
+    settings_error: Option<String>,
     boards: Boards,
     store: Option<Store>,
     nav: nav_bar::Model,
     page: Page,
 }
 
+#[derive(Clone, Copy)]
+enum AppDrawer {
+    About,
+    Settings,
+}
+
 #[derive(Clone, Debug)]
 pub enum Message {
     Board(BoardMessage),
     About,
+    Settings,
+    CloseDrawer,
+    Preference(settings::Change),
     OpenUrl(String),
 }
 
@@ -50,7 +64,11 @@ impl cosmic::Application for AppModel {
                 .version(env!("CARGO_PKG_VERSION"))
                 .links([(fl!("repository"), env!("CARGO_PKG_REPOSITORY"))])
                 .license(env!("CARGO_PKG_LICENSE")),
-            show_about: false,
+            drawer: None,
+            config: cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
+                .map(|config| Config::get_entry(&config).unwrap_or_else(|(_, config)| config))
+                .unwrap_or_default(),
+            settings_error: None,
             boards: Boards::default(),
             store: None,
             nav: nav_bar::Model::default(),
@@ -87,6 +105,11 @@ impl cosmic::Application for AppModel {
             Some(widget::icon::from_name("list-add-symbolic").handle()),
             MenuAction::NewBoard,
         )];
+        board.push(menu::Item::Button(
+            fl!("settings"),
+            Some(widget::icon::from_name("preferences-system-symbolic").handle()),
+            MenuAction::Settings,
+        ));
         if self.boards.active().is_some() {
             board.extend([
                 menu::Item::Button(
@@ -129,7 +152,9 @@ impl cosmic::Application for AppModel {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        self.page.view(self.boards.active()).map(Message::Board)
+        self.page
+            .view(self.boards.active(), &self.config.preferences)
+            .map(Message::Board)
     }
 
     fn dialog(&self) -> Option<Element<'_, Message>> {
@@ -137,23 +162,60 @@ impl cosmic::Application for AppModel {
     }
 
     fn context_drawer(&self) -> Option<ContextDrawer<'_, Message>> {
-        if self.show_about {
-            return Some(context_drawer::about(
+        match self.drawer {
+            Some(AppDrawer::About) => Some(context_drawer::about(
                 &self.about,
                 |url| Message::OpenUrl(url.to_owned()),
-                Message::About,
-            ));
+                Message::CloseDrawer,
+            )),
+            Some(AppDrawer::Settings) => Some(settings::drawer(
+                &self.config.preferences,
+                self.settings_error.as_deref(),
+                Message::Preference,
+                Message::CloseDrawer,
+            )),
+            None => self
+                .page
+                .drawer(self.boards.active()?)
+                .map(|drawer| drawer.map(Message::Board)),
         }
-        self.page
-            .drawer(self.boards.active()?)
-            .map(|drawer| drawer.map(Message::Board))
+    }
+
+    fn on_escape(&mut self) -> Task<cosmic::Action<Message>> {
+        if !self.page.dismiss_dialog() {
+            if self.drawer.is_some() {
+                self.drawer = None;
+            } else {
+                self.page.dismiss_drawer();
+            }
+        }
+        self.sync_drawer();
+        Task::none()
     }
 
     fn update(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         let message = match message {
-            Message::About => {
-                self.show_about = !self.show_about;
-                self.core.window.show_context = self.show_about || self.page.show_drawer();
+            Message::About | Message::Settings | Message::CloseDrawer => {
+                self.drawer = match message {
+                    Message::About => Some(AppDrawer::About),
+                    Message::Settings => Some(AppDrawer::Settings),
+                    _ => None,
+                };
+                self.sync_drawer();
+                return Task::none();
+            }
+            Message::Preference(change) => {
+                let mut next = self.config.clone();
+                change.apply(&mut next.preferences);
+                let save = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
+                    .and_then(|config| next.write_entry(&config));
+                match save {
+                    Ok(()) => {
+                        self.config = next;
+                        self.settings_error = None;
+                    }
+                    Err(error) => self.settings_error = Some(error.to_string()),
+                }
                 return Task::none();
             }
             Message::OpenUrl(url) => {
@@ -165,7 +227,7 @@ impl cosmic::Application for AppModel {
             Message::Board(message) => message,
         };
         if matches!(message, BoardMessage::Open(_) | BoardMessage::ShowArchive) {
-            self.show_about = false;
+            self.drawer = None;
         }
         let mut task = Task::none();
         if matches!(message, BoardMessage::Reload) {
@@ -180,16 +242,20 @@ impl cosmic::Application for AppModel {
                 .focus(&message)
                 .map(|message| cosmic::Action::App(Message::Board(message)));
         }
-        self.core.window.show_context = self.show_about || self.page.show_drawer();
+        self.sync_drawer();
         task
     }
 }
 
 impl AppModel {
+    fn sync_drawer(&mut self) {
+        self.core.window.show_context = self.drawer.is_some() || self.page.show_drawer();
+    }
+
     fn load(&mut self) {
         match Store::open().and_then(|store| Ok((store.load()?, store))) {
             Ok((mut boards, store)) => {
-                if boards.active().is_none() {
+                if !self.config.preferences.reopen_last_board || boards.active().is_none() {
                     boards.selected = boards.boards.first().map(|board| board.id);
                 }
                 self.boards = boards;
@@ -234,7 +300,7 @@ impl AppModel {
 
     fn close_drawer(&mut self) {
         self.page.reset();
-        self.show_about = false;
+        self.drawer = None;
         self.core.window.show_context = false;
     }
 
@@ -264,6 +330,7 @@ enum MenuAction {
     NewColumn,
     Archive,
     About,
+    Settings,
 }
 
 impl menu::action::MenuAction for MenuAction {
@@ -276,6 +343,7 @@ impl menu::action::MenuAction for MenuAction {
             Self::NewColumn => BoardMessage::Name(NameTarget::Column),
             Self::Archive => BoardMessage::ShowArchive,
             Self::About => return Message::About,
+            Self::Settings => return Message::Settings,
         })
     }
 }

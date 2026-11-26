@@ -101,7 +101,7 @@ pub enum Message {
     Open(Id),
     Close,
     EditTitle(String),
-    ToggleTitle,
+    EditTitleActive(bool),
     Description(text_editor::Action),
     ToggleCalendar,
     CloseCalendar,
@@ -159,6 +159,26 @@ impl Page {
         *self = Self::default();
     }
 
+    pub fn dismiss_dialog(&mut self) -> bool {
+        self.name.take().is_some()
+    }
+
+    pub fn dismiss_drawer(&mut self) {
+        if self
+            .editor
+            .as_mut()
+            .is_some_and(|editor| editor.calendar.take().is_some())
+        {
+            return;
+        }
+        self.close_drawer();
+    }
+
+    fn close_drawer(&mut self) {
+        self.editor = None;
+        self.archive = false;
+    }
+
     pub fn show_drawer(&self) -> bool {
         self.archive || self.editor.is_some()
     }
@@ -169,6 +189,11 @@ impl Page {
     }
 
     pub fn update(&mut self, boards: &mut Boards, message: Message) -> bool {
+        if matches!(message, Message::Close) {
+            self.close_drawer();
+            return false;
+        }
+
         if self.pending.is_some() {
             match message {
                 Message::Retry => {
@@ -290,10 +315,6 @@ impl Page {
                     });
                 }
             }
-            Message::Close => {
-                self.editor = None;
-                self.archive = false;
-            }
             Message::ShowArchive => {
                 self.editor = None;
                 self.archive = true;
@@ -402,7 +423,7 @@ impl Page {
         };
         match message {
             Message::EditTitle(value) => editor.card.title = value,
-            Message::ToggleTitle => editor.editing_title = !editor.editing_title,
+            Message::EditTitleActive(active) => editor.editing_title = active,
             Message::Description(action) => editor.description.perform(action),
             Message::ToggleCalendar => {
                 editor.calendar = if editor.calendar.is_some() {

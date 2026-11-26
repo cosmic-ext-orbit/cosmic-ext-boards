@@ -98,6 +98,7 @@ impl Chips {
                         .push(
                             action("window-close-symbolic", remove_label(label))
                                 .extra_small()
+                                .padding(2)
                                 .on_press(on_event(Event::Remove(index))),
                         ),
                 ))

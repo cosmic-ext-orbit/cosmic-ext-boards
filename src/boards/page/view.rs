@@ -8,6 +8,7 @@ use jiff::{ZonedDateTime, civil::Date};
 use super::{
     Board, CARD_INPUT, Column, DueFilter, Message, NAME_INPUT, NameTarget, Page, Target, drag,
 };
+use crate::config::{Density, Preferences};
 use crate::fl;
 use crate::widgets::{action, chips::chip, symbolic_svg};
 
@@ -45,7 +46,11 @@ impl Page {
         )
     }
 
-    pub fn view<'a>(&'a self, board: Option<&'a Board>) -> Element<'a, Message> {
+    pub fn view<'a>(
+        &'a self,
+        board: Option<&'a Board>,
+        preferences: &Preferences,
+    ) -> Element<'a, Message> {
         let spacing = cosmic::theme::spacing();
         let mut content = widget::column::with_capacity(3)
             .spacing(spacing.space_s)
@@ -81,7 +86,7 @@ impl Page {
         let today = ZonedDateTime::now().date();
         let columns = board.columns.iter().fold(
             widget::row::with_capacity(board.columns.len()).spacing(spacing.space_xs),
-            |row, column| row.push(self.column(board, column, today)),
+            |row, column| row.push(self.column(board, column, today, preferences)),
         );
         let toolbar = widget::row::with_capacity(3)
             .spacing(spacing.space_xs)
@@ -161,6 +166,7 @@ impl Page {
         board: &'a Board,
         column: &'a Column,
         today: Date,
+        preferences: &Preferences,
     ) -> Element<'a, Message> {
         let spacing = cosmic::theme::spacing();
         let index = board
@@ -189,6 +195,11 @@ impl Page {
             })
             .collect::<Vec<_>>();
         let count = cards.len();
+        let show_info = preferences.density != Density::TitleOnly;
+        let padding = match preferences.density {
+            Density::Comfortable => [8, 10],
+            Density::Compact | Density::TitleOnly => [4, 8],
+        };
         let cards = cards.into_iter().fold(
             widget::column::with_capacity(count).spacing(spacing.space_xxs),
             |list, card| {
@@ -201,7 +212,7 @@ impl Page {
                     .spacing(spacing.space_xxxs)
                     .width(Length::Fill)
                     .push(title);
-                if !card.labels.is_empty() {
+                if show_info && preferences.show_labels && !card.labels.is_empty() {
                     let labels = card.labels.iter().fold(
                         widget::row::with_capacity(card.labels.len()).spacing(spacing.space_xxxs),
                         |row, label| row.push(chip(label)),
@@ -209,14 +220,17 @@ impl Page {
                     content = content.push(labels.wrap());
                 }
                 let mut metadata = widget::row::with_capacity(2).spacing(spacing.space_xs);
-                if !card.checklist.is_empty() {
+                let show_checklist =
+                    show_info && preferences.show_checklist_progress && !card.checklist.is_empty();
+                let due = card.due.filter(|_| show_info && preferences.show_due_dates);
+                if show_checklist {
                     let done = card.checklist.iter().filter(|item| item.checked).count();
                     metadata = metadata.push(detail(
                         "object-select-symbolic",
                         format!("{done}/{}", card.checklist.len()),
                     ));
                 }
-                if let Some(due) = card.due {
+                if let Some(due) = due {
                     let date = if due.year() == today.year() {
                         due.strftime("%b %-d").to_string()
                     } else {
@@ -231,7 +245,7 @@ impl Page {
                         },
                     ));
                 }
-                if !card.checklist.is_empty() || card.due.is_some() {
+                if show_checklist || due.is_some() {
                     content = content.push(metadata.wrap());
                 }
                 let surface = drag::source(
@@ -239,7 +253,7 @@ impl Page {
                     self.drag_widgets.sources[&card.id].clone(),
                     button::custom(content)
                         .class(card_style(selected))
-                        .padding([8, 10])
+                        .padding(padding)
                         .width(Length::Fill)
                         .on_press(Message::Open(card.id)),
                 );
@@ -327,7 +341,11 @@ impl Page {
             .spacing(spacing.space_xxs)
             .align_y(Alignment::Center)
             .push(text::heading(&column.name))
-            .push(chip(count.to_string()))
+            .push_maybe(
+                preferences
+                    .show_column_counts
+                    .then(|| chip(count.to_string())),
+            )
             .push(cosmic::iced::widget::space().width(Length::Fill))
             .push(options);
         let header = widget::container(header)

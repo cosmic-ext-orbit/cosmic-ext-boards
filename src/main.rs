@@ -3,7 +3,9 @@
 mod app;
 mod boards;
 
+mod config;
 mod i18n;
+mod settings;
 mod widgets;
 
 fn main() -> cosmic::iced::Result {

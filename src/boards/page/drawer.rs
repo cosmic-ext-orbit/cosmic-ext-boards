@@ -27,33 +27,23 @@ impl Page {
             .collect();
         let selected = board.columns.iter().position(|entry| entry.id == column.id);
         let ids: Vec<_> = board.columns.iter().map(|entry| entry.id).collect();
-        let ordering = widget::row::with_capacity(2)
-            .push(
-                action("go-up-symbolic", fl!("move-up"))
-                    .on_press(Message::Shift(id, column.id, false)),
-            )
-            .push(
-                action("go-down-symbolic", fl!("move-down"))
-                    .on_press(Message::Shift(id, column.id, true)),
-            );
-        let title = if editor.card.title.trim().is_empty() {
-            fl!("card-title")
-        } else {
-            editor.card.title.clone()
-        };
+        let mut active = column.cards.iter().filter(|card| !card.archived);
+        let can_move_up = active.clone().next().is_some_and(|card| card.id != id);
+        let can_move_down = active.next_back().is_some_and(|card| card.id != id);
+        let title = widget::editable_input(
+            fl!("card-title"),
+            &editor.card.title,
+            editor.editing_title,
+            Message::EditTitleActive,
+        )
+        .font(cosmic::font::bold())
+        .size(20)
+        .on_input(Message::EditTitle)
+        .on_submit(|_| Message::EditTitleActive(false));
 
         let content = settings::view_column(vec![
             widget::column::with_capacity(3)
                 .spacing(spacing.space_xs)
-                .push_maybe(editor.editing_title.then(|| {
-                    settings::item_row(vec![
-                        text::body(fl!("card-title")).into(),
-                        text_input(fl!("card-title"), &editor.card.title)
-                            .on_input(Message::EditTitle)
-                            .on_submit(|_| Message::ToggleTitle)
-                            .into(),
-                    ])
-                }))
                 .push(settings::item_row(vec![
                     field_label(
                         symbolic_svg(include_bytes!(
@@ -66,7 +56,6 @@ impl Page {
                         Message::MoveToColumn(id, ids[index])
                     })
                     .into(),
-                    ordering.into(),
                 ]))
                 .push(due_date(editor))
                 .into(),
@@ -97,8 +86,8 @@ impl Page {
         ])
         .spacing(spacing.space_s);
 
-        let footer = widget::row::with_capacity(2)
-            .spacing(spacing.space_xs)
+        let footer = widget::row::with_capacity(5)
+            .spacing(spacing.space_xxs)
             .push(
                 button::suggested(fl!("save"))
                     .leading_icon(icon::from_name("document-save-symbolic"))
@@ -108,12 +97,20 @@ impl Page {
                 button::standard(fl!("archive"))
                     .leading_icon(icon::from_name("mail-archive-symbolic"))
                     .on_press(Message::Archive(id, true)),
+            )
+            .push(widget::space::horizontal())
+            .push(
+                action("go-up-symbolic", fl!("move-up"))
+                    .on_press_maybe(can_move_up.then_some(Message::Shift(id, column.id, false))),
+            )
+            .push(
+                action("go-down-symbolic", fl!("move-down"))
+                    .on_press_maybe(can_move_down.then_some(Message::Shift(id, column.id, true))),
             );
 
         Some(
             context_drawer::context_drawer(content, Message::Close)
-                .title(title)
-                .actions(action("edit-symbolic", fl!("rename-card")).on_press(Message::ToggleTitle))
+                .header(title)
                 .footer(footer),
         )
     }
