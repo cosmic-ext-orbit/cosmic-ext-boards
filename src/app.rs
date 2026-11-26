@@ -84,14 +84,26 @@ impl cosmic::Application for AppModel {
         let keys = Default::default();
         let mut board = vec![menu::Item::Button(
             fl!("new-board"),
-            None,
+            Some(widget::icon::from_name("list-add-symbolic").handle()),
             MenuAction::NewBoard,
         )];
         if self.boards.active().is_some() {
             board.extend([
-                menu::Item::Button(fl!("rename-board"), None, MenuAction::RenameBoard),
-                menu::Item::Button(fl!("new-column"), None, MenuAction::NewColumn),
-                menu::Item::Button(fl!("archive"), None, MenuAction::Archive),
+                menu::Item::Button(
+                    fl!("rename-board"),
+                    Some(widget::icon::from_name("edit-symbolic").handle()),
+                    MenuAction::RenameBoard,
+                ),
+                menu::Item::Button(
+                    fl!("new-column"),
+                    Some(widget::icon::from_name("list-add-symbolic").handle()),
+                    MenuAction::NewColumn,
+                ),
+                menu::Item::Button(
+                    fl!("archive"),
+                    Some(widget::icon::from_name("mail-archive-symbolic").handle()),
+                    MenuAction::Archive,
+                ),
             ]);
         }
         vec![
@@ -104,7 +116,11 @@ impl cosmic::Application for AppModel {
                     Element::from(menu::root(fl!("help"))),
                     menu::items(
                         &keys,
-                        vec![menu::Item::Button(fl!("about"), None, MenuAction::About)],
+                        vec![menu::Item::Button(
+                            fl!("about"),
+                            Some(widget::icon::from_name("help-about-symbolic").handle()),
+                            MenuAction::About,
+                        )],
                     ),
                 ),
             ])

@@ -4,6 +4,7 @@ mod app;
 mod boards;
 
 mod i18n;
+mod widgets;
 
 fn main() -> cosmic::iced::Result {
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();

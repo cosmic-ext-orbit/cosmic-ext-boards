@@ -1,3 +1,4 @@
+mod drawer;
 mod view;
 
 use std::sync::LazyLock;
@@ -11,6 +12,7 @@ use super::{
     drag::{self, Target},
 };
 use crate::fl;
+use crate::widgets::chips::{self, Chips, Triggers};
 
 static NAME_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
 static CARD_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
@@ -37,7 +39,8 @@ struct Editor {
     calendar: Option<CalendarModel>,
     description: text_editor::Content<cosmic::Renderer>,
     item: String,
-    labels: String,
+    labels: Chips,
+    editing_title: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -98,12 +101,14 @@ pub enum Message {
     Open(Id),
     Close,
     EditTitle(String),
+    ToggleTitle,
     Description(text_editor::Action),
     ToggleCalendar,
+    CloseCalendar,
     CalendarMonth(bool),
     SelectDate(Date),
     Date(String),
-    Labels(String),
+    Labels(chips::Event),
     Item(String),
     AddItem,
     ToggleItem(Id, bool),
@@ -274,7 +279,14 @@ impl Page {
                         calendar: None,
                         description: text_editor::Content::with_text(&card.description),
                         item: String::new(),
-                        labels: card.labels.join(", "),
+                        labels: Chips::new(
+                            card.labels.clone(),
+                            Triggers {
+                                separators: &[','],
+                                enter: true,
+                            },
+                        ),
+                        editing_title: false,
                     });
                 }
             }
@@ -390,6 +402,7 @@ impl Page {
         };
         match message {
             Message::EditTitle(value) => editor.card.title = value,
+            Message::ToggleTitle => editor.editing_title = !editor.editing_title,
             Message::Description(action) => editor.description.perform(action),
             Message::ToggleCalendar => {
                 editor.calendar = if editor.calendar.is_some() {
@@ -402,6 +415,7 @@ impl Page {
                     Some(CalendarModel::new(date, date))
                 };
             }
+            Message::CloseCalendar => editor.calendar = None,
             Message::CalendarMonth(next) => {
                 if let Some(calendar) = &mut editor.calendar {
                     let step = if next { 1 } else { -1 };
@@ -415,7 +429,7 @@ impl Page {
                 editor.calendar = None;
             }
             Message::Date(value) => editor.date = value,
-            Message::Labels(value) => editor.labels = value,
+            Message::Labels(event) => editor.labels.update(event),
             Message::Item(value) => editor.item = value,
             Message::AddItem if !editor.item.trim().is_empty() => {
                 editor.card.checklist.push(ChecklistItem {
@@ -441,17 +455,8 @@ impl Page {
                 editor.card.title = editor.card.title.trim().into();
                 editor.card.description = editor.description.text();
                 editor.card.due = editor.date.trim().parse().ok();
-                editor.card.labels = editor
-                    .labels
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|label| !label.is_empty())
-                    .fold(Vec::new(), |mut labels, label| {
-                        if !labels.iter().any(|existing| existing == label) {
-                            labels.push(label.to_owned());
-                        }
-                        labels
-                    });
+                editor.labels.commit_draft();
+                editor.card.labels = editor.labels.values().to_vec();
                 *card = editor.card.clone();
                 return true;
             }
