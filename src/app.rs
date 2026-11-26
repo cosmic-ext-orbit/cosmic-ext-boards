@@ -68,38 +68,6 @@ impl cosmic::Application for AppModel {
         Some(&self.nav)
     }
 
-    fn nav_bar(&self) -> Option<Element<'_, cosmic::Action<Message>>> {
-        if !self.core.nav_bar_active() {
-            return None;
-        }
-        let spacing = cosmic::theme::spacing();
-        let new_board = widget::button::suggested(fl!("new-board"))
-            .leading_icon(widget::icon::from_name("list-add-symbolic"))
-            .width(cosmic::iced::Length::Fill)
-            .on_press(cosmic::Action::App(Message::Board(BoardMessage::NewBoard)));
-        let boards = widget::nav_bar(&self.nav, |id| {
-            cosmic::Action::Cosmic(cosmic::app::Action::NavBar(id))
-        })
-        .into_container();
-        Some(
-            widget::container(
-                widget::column::with_capacity(2)
-                    .spacing(spacing.space_xs)
-                    .push(new_board)
-                    .push(boards),
-            )
-            .padding(spacing.space_xs)
-            .width(if self.core.is_condensed() {
-                cosmic::iced::Length::Fill
-            } else {
-                cosmic::iced::Length::Fixed(192.0)
-            })
-            .height(cosmic::iced::Length::Fill)
-            .class(cosmic::theme::Container::Card)
-            .into(),
-        )
-    }
-
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<cosmic::Action<Message>> {
         if self.page.pending.is_some() {
             return Task::none();
@@ -261,7 +229,7 @@ impl AppModel {
                 .nav
                 .insert()
                 .text(name.clone())
-                .icon(widget::icon::from_name("view-dual-symbolic"))
+                .icon(widget::icon::from_name("folder-symbolic"))
                 .data(*id);
             if Some(*id) == self.boards.selected {
                 item.activate();
