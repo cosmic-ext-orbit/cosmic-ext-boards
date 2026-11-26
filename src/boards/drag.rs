@@ -57,7 +57,7 @@ impl Widgets {
     }
 }
 
-pub(super) fn handle<'a>(
+pub(super) fn source<'a>(
     card: Id,
     id: widget::Id,
     child: impl Into<Element<'a, Message>>,

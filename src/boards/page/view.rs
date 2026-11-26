@@ -214,29 +214,15 @@ impl Page {
                 if !card.checklist.is_empty() || card.due.is_some() {
                     content = content.push(metadata.wrap());
                 }
-                let handle = drag::handle(
+                let surface = drag::source(
                     card.id,
                     self.drag_widgets.sources[&card.id].clone(),
-                    widget::container(
-                        widget::icon::from_name("view-grid-symbolic")
-                            .size(14)
-                            .icon(),
-                    )
-                    .padding([6, 3]),
+                    button::custom(content)
+                        .class(card_style(selected))
+                        .padding([8, 10])
+                        .width(Length::Fill)
+                        .on_press(Message::Open(card.id)),
                 );
-                let row = widget::container(
-                    widget::row::with_capacity(2)
-                        .align_y(Alignment::Center)
-                        .push(
-                            button::custom(content)
-                                .class(card_style(selected))
-                                .padding([8, 10])
-                                .width(Length::Fill)
-                                .on_press(Message::Open(card.id)),
-                        )
-                        .push(handle),
-                )
-                .class(cosmic::theme::Container::Card);
                 let target = Target {
                     column: column.id,
                     before: Some(card.id),
@@ -246,7 +232,7 @@ impl Page {
                         self.drag_widgets.destinations[&target].clone(),
                         widget::column::with_capacity(2)
                             .push(self.insertion_line(target))
-                            .push(row),
+                            .push(surface),
                     ),
                 )
             },
