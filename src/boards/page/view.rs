@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use cosmic::Element;
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::iced::{Alignment, Length, widget::scrollable};
-use cosmic::widget::{self, TextEditor, button, checkbox, text, text_input};
+use cosmic::widget::{self, TextEditor, button, checkbox, menu, text, text_input};
 use jiff::{
     ZonedDateTime,
     civil::{Date, Weekday},
@@ -46,8 +46,8 @@ impl Page {
     pub fn view<'a>(&'a self, board: Option<&'a Board>) -> Element<'a, Message> {
         let spacing = cosmic::theme::spacing();
         let mut content = widget::column::with_capacity(3)
-            .spacing(spacing.space_m)
-            .padding(spacing.space_m);
+            .spacing(spacing.space_s)
+            .padding(spacing.space_s);
         if let Some(error) = &self.error {
             let mut status = widget::row::with_capacity(3)
                 .spacing(spacing.space_xs)
@@ -62,27 +62,42 @@ impl Page {
             content = content.push(status);
         }
         let Some(board) = board else {
-            return content
-                .push(text::title2(fl!("no-boards")))
-                .push(button::suggested(fl!("new-board")).on_press(Message::NewBoard))
-                .into();
+            return content.push(text::title2(fl!("no-boards"))).into();
         };
         let today = ZonedDateTime::now().date();
         let columns = board.columns.iter().fold(
-            widget::row::with_capacity(board.columns.len())
-                .spacing(spacing.space_s)
-                .height(Length::Fill),
+            widget::row::with_capacity(board.columns.len()).spacing(spacing.space_xs),
             |row, column| row.push(self.column(board, column, today)),
         );
+        let toolbar = widget::row::with_capacity(3)
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center)
+            .push(widget::container(text::title2(&board.name)).width(Length::FillPortion(2)))
+            .push(
+                widget::container(
+                    text_input(fl!("search"), &self.search)
+                        .width(Length::Fill)
+                        .on_input(Message::Search),
+                )
+                .width(Length::FillPortion(1))
+                .max_width(218),
+            )
+            .push(
+                button::standard(fl!("filter"))
+                    .class(card_style(
+                        self.show_filters || self.label.is_some() || self.due != DueFilter::All,
+                    ))
+                    .on_press(Message::ToggleFilters),
+            );
         content
-            .push(text::title1(&board.name))
-            .push(text_input(fl!("search"), &self.search).on_input(Message::Search))
-            .push(self.filters(board))
+            .push(toolbar)
+            .push_maybe(self.show_filters.then(|| self.filters(board)))
             .push(
                 widget::scrollable(columns)
-                    .direction(scrollable::Direction::Horizontal(
-                        scrollable::Scrollbar::default(),
-                    ))
+                    .direction(scrollable::Direction::Both {
+                        horizontal: scrollable::Scrollbar::default(),
+                        vertical: scrollable::Scrollbar::default(),
+                    })
                     .height(Length::Fill),
             )
             .height(Length::Fill)
@@ -117,6 +132,7 @@ impl Page {
             .push(widget::dropdown(dates.to_vec(), selected_date, |index| {
                 Message::FilterDue(DueFilter::OPTIONS[index])
             }))
+            .wrap()
             .into()
     }
 
@@ -132,20 +148,6 @@ impl Page {
             .iter()
             .position(|entry| entry.id == column.id)
             .unwrap();
-        let header = widget::row::with_capacity(3)
-            .spacing(spacing.space_xxs)
-            .align_y(Alignment::Center)
-            .push(
-                button::text(&column.name)
-                    .on_press(Message::Name(NameTarget::RenameColumn(column.id))),
-            )
-            .push(
-                button::text("←")
-                    .on_press_maybe((index > 0).then_some(Message::ShiftColumn(column.id, false))),
-            )
-            .push(button::text("→").on_press_maybe(
-                (index + 1 < board.columns.len()).then_some(Message::ShiftColumn(column.id, true)),
-            ));
         let query = self.search.trim().to_lowercase();
         let cards = column
             .cards
@@ -165,73 +167,90 @@ impl Page {
                             .iter()
                             .any(|label| label.to_lowercase().contains(&query)))
             })
-            .fold(
-                widget::column::with_capacity(column.cards.len()).spacing(spacing.space_xxs),
-                |list, card| {
-                    let mut details = Vec::new();
-                    if !card.checklist.is_empty() {
-                        let done = card.checklist.iter().filter(|item| item.checked).count();
-                        details.push(format!("{done}/{}", card.checklist.len()));
-                    }
-                    if let Some(due) = card.due {
-                        details.push(if due < today && !column.complete {
-                            fl!("overdue", date = due.to_string())
-                        } else {
-                            due.to_string()
-                        });
-                    }
-                    if !card.labels.is_empty() {
-                        details.push(card.labels.join(", "));
-                    }
-                    let label = widget::column::with_capacity(2).push(text::body(&card.title));
-                    let label = if details.is_empty() {
-                        label
-                    } else {
-                        label.push(text::caption(details.join(" · ")))
-                    };
-                    let handle = drag::handle(
-                        card.id,
-                        self.drag_widgets.sources[&card.id].clone(),
-                        widget::container(
-                            widget::icon::from_name("list-drag-handle-symbolic")
-                                .size(16)
-                                .icon(),
-                        )
-                        .padding(spacing.space_xxs),
+            .collect::<Vec<_>>();
+        let count = cards.len();
+        let cards = cards.into_iter().fold(
+            widget::column::with_capacity(count).spacing(spacing.space_xxs),
+            |list, card| {
+                let selected = self
+                    .editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.card.id == card.id);
+                let title = text::heading(&card.title);
+                let mut content = widget::column::with_capacity(3)
+                    .spacing(spacing.space_xxxs)
+                    .width(Length::Fill)
+                    .push(title);
+                if !card.labels.is_empty() {
+                    let labels = card.labels.iter().fold(
+                        widget::row::with_capacity(card.labels.len()).spacing(spacing.space_xxxs),
+                        |row, label| row.push(chip(label)),
                     );
-                    let row = widget::row::with_capacity(2)
+                    content = content.push(labels.wrap());
+                }
+                let mut metadata = widget::row::with_capacity(2).spacing(spacing.space_xs);
+                if !card.checklist.is_empty() {
+                    let done = card.checklist.iter().filter(|item| item.checked).count();
+                    metadata = metadata.push(detail(
+                        "object-select-symbolic",
+                        format!("{done}/{}", card.checklist.len()),
+                    ));
+                }
+                if let Some(due) = card.due {
+                    let date = if due.year() == today.year() {
+                        due.strftime("%b %-d").to_string()
+                    } else {
+                        due.to_string()
+                    };
+                    metadata = metadata.push(detail(
+                        "x-office-calendar-symbolic",
+                        if due < today && !column.complete {
+                            fl!("overdue", date = date)
+                        } else {
+                            date
+                        },
+                    ));
+                }
+                if !card.checklist.is_empty() || card.due.is_some() {
+                    content = content.push(metadata.wrap());
+                }
+                let handle = drag::handle(
+                    card.id,
+                    self.drag_widgets.sources[&card.id].clone(),
+                    widget::container(
+                        widget::icon::from_name("view-grid-symbolic")
+                            .size(14)
+                            .icon(),
+                    )
+                    .padding([6, 3]),
+                );
+                let row = widget::container(
+                    widget::row::with_capacity(2)
                         .align_y(Alignment::Center)
-                        .push(handle)
                         .push(
-                            button::custom(label)
-                                .class(
-                                    if self
-                                        .editor
-                                        .as_ref()
-                                        .is_some_and(|editor| editor.card.id == card.id)
-                                    {
-                                        cosmic::theme::Button::Suggested
-                                    } else {
-                                        cosmic::theme::Button::Standard
-                                    },
-                                )
+                            button::custom(content)
+                                .class(card_style(selected))
+                                .padding([8, 10])
                                 .width(Length::Fill)
                                 .on_press(Message::Open(card.id)),
-                        );
-                    let target = Target {
-                        column: column.id,
-                        before: Some(card.id),
-                    };
-                    list.push(
-                        target.view(
-                            self.drag_widgets.destinations[&target].clone(),
-                            widget::column::with_capacity(2)
-                                .push(self.insertion_line(target))
-                                .push(row),
-                        ),
-                    )
-                },
-            );
+                        )
+                        .push(handle),
+                )
+                .class(cosmic::theme::Container::Card);
+                let target = Target {
+                    column: column.id,
+                    before: Some(card.id),
+                };
+                list.push(
+                    target.view(
+                        self.drag_widgets.destinations[&target].clone(),
+                        widget::column::with_capacity(2)
+                            .push(self.insertion_line(target))
+                            .push(row),
+                    ),
+                )
+            },
+        );
         let end = Target {
             column: column.id,
             before: None,
@@ -241,7 +260,7 @@ impl Page {
                 self.drag_widgets.destinations[&end].clone(),
                 widget::column::with_capacity(2)
                     .push(self.insertion_line(end))
-                    .push(cosmic::iced::widget::space().width(Length::Fill).height(32)),
+                    .push(cosmic::iced::widget::space().width(Length::Fill).height(12)),
             ),
         );
         let add: Element<_> = match &self.composer {
@@ -259,25 +278,63 @@ impl Page {
                         .on_press(Message::CancelCard),
                 )
                 .into(),
-            _ => button::standard(fl!("add-card"))
-                .on_press(Message::Compose(column.id))
-                .into(),
+            _ => button::custom(
+                widget::container(detail("list-add-symbolic", fl!("add-card")))
+                    .center_x(Length::Fill),
+            )
+            .class(card_style(false))
+            .width(Length::Fill)
+            .padding([7, 8])
+            .on_press(Message::Compose(column.id))
+            .into(),
         };
+        let id = column.id;
+        let mut actions = vec![menu::Item::Button(
+            fl!("rename-column"),
+            None,
+            ColumnAction::Rename(id),
+        )];
+        if index > 0 {
+            actions.push(menu::Item::Button(
+                fl!("move-left"),
+                None,
+                ColumnAction::Shift(id, false),
+            ));
+        }
+        if index + 1 < board.columns.len() {
+            actions.push(menu::Item::Button(
+                fl!("move-right"),
+                None,
+                ColumnAction::Shift(id, true),
+            ));
+        }
+        actions.push(menu::Item::CheckBox(
+            fl!("completed-column"),
+            None,
+            column.complete,
+            ColumnAction::Complete(id, !column.complete),
+        ));
+        let options = menu::bar(vec![menu::Tree::with_children(
+            Element::from(menu::root("…")),
+            menu::items(&Default::default(), actions),
+        )]);
+        let header = widget::row::with_capacity(4)
+            .spacing(spacing.space_xxs)
+            .align_y(Alignment::Center)
+            .push(text::heading(&column.name))
+            .push(chip(count.to_string()))
+            .push(cosmic::iced::widget::space().width(Length::Fill))
+            .push(options);
         widget::container(
-            widget::column::with_capacity(4)
-                .spacing(spacing.space_xs)
+            widget::column::with_capacity(3)
+                .spacing(spacing.space_xxs)
                 .push(header)
-                .push(
-                    checkbox(column.complete)
-                        .label(fl!("completed-column"))
-                        .on_toggle(move |complete| Message::CompleteColumn(column.id, complete)),
-                )
                 .push(widget::scrollable(cards).height(Length::Fill))
                 .push(add),
         )
-        .padding(spacing.space_s)
-        .width(260)
-        .height(Length::Fill)
+        .padding(spacing.space_xs)
+        .width(248)
+        .height(276)
         .class(cosmic::theme::Container::Card)
         .into()
     }
@@ -357,10 +414,15 @@ impl Page {
         );
         let content = widget::column::with_capacity(13)
             .spacing(spacing.space_xs)
-            .push(text::body(fl!("status")))
-            .push(widget::dropdown(destinations, selected, move |index| {
-                Message::MoveToColumn(id, column_ids[index])
-            }))
+            .push(
+                widget::row::with_capacity(2)
+                    .align_y(Alignment::Center)
+                    .spacing(spacing.space_xs)
+                    .push(widget::container(text::body(fl!("status"))).width(92))
+                    .push(widget::dropdown(destinations, selected, move |index| {
+                        Message::MoveToColumn(id, column_ids[index])
+                    })),
+            )
             .push(
                 widget::row::with_capacity(2)
                     .spacing(spacing.space_xs)
@@ -381,10 +443,11 @@ impl Page {
                     .height(100)
                     .on_action(Message::Description),
             )
-            .push(text::body(fl!("due-date")))
             .push(
-                widget::row::with_capacity(2)
+                widget::row::with_capacity(3)
+                    .align_y(Alignment::Center)
                     .spacing(spacing.space_xxs)
+                    .push(widget::container(text::body(fl!("due-date"))).width(92))
                     .push(text_input("YYYY-MM-DD", &editor.date).on_input(Message::Date))
                     .push(
                         button::icon(widget::icon::from_name("x-office-calendar-symbolic"))
@@ -427,5 +490,97 @@ impl Page {
                 .title(&card.title)
                 .footer(footer),
         )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ColumnAction {
+    Rename(super::Id),
+    Shift(super::Id, bool),
+    Complete(super::Id, bool),
+}
+
+impl menu::action::MenuAction for ColumnAction {
+    type Message = Message;
+
+    fn message(&self) -> Message {
+        match *self {
+            Self::Rename(id) => Message::Name(NameTarget::RenameColumn(id)),
+            Self::Shift(id, direction) => Message::ShiftColumn(id, direction),
+            Self::Complete(id, complete) => Message::CompleteColumn(id, complete),
+        }
+    }
+}
+
+fn detail<'a>(icon: &'static str, label: String) -> Element<'a, Message> {
+    widget::row::with_capacity(2)
+        .align_y(Alignment::Center)
+        .spacing(4)
+        .push(widget::icon::from_name(icon).size(14).icon())
+        .push(text::caption(label))
+        .into()
+}
+
+fn chip<'a>(label: impl Into<std::borrow::Cow<'a, str>> + 'a) -> Element<'a, Message> {
+    widget::container(text::caption(label))
+        .padding([2, 6])
+        .style(
+            |theme: &cosmic::Theme| cosmic::iced::widget::container::Style {
+                background: Some(
+                    cosmic::iced::Color::from(theme.cosmic().accent_color())
+                        .scale_alpha(0.18)
+                        .into(),
+                ),
+                border: cosmic::iced::border::rounded(5),
+                ..Default::default()
+            },
+        )
+        .into()
+}
+
+fn card_style(selected: bool) -> cosmic::theme::Button {
+    use button::Catalog;
+    use cosmic::theme::Button;
+
+    fn rectangular(
+        style: button::Style,
+        highlighted: bool,
+        theme: &cosmic::Theme,
+    ) -> button::Style {
+        button::Style {
+            border_radius: 7.into(),
+            border_width: 1.0,
+            border_color: if highlighted {
+                theme.cosmic().accent_color().into()
+            } else {
+                style.border_color
+            },
+            ..style
+        }
+    }
+
+    Button::Custom {
+        active: Box::new(move |focused, theme| {
+            rectangular(
+                theme.active(focused, false, &Button::Standard),
+                selected || focused,
+                theme,
+            )
+        }),
+        hovered: Box::new(move |focused, theme| {
+            rectangular(
+                theme.hovered(focused, false, &Button::Standard),
+                selected || focused,
+                theme,
+            )
+        }),
+        pressed: Box::new(move |focused, theme| {
+            rectangular(
+                theme.pressed(focused, false, &Button::Standard),
+                selected || focused,
+                theme,
+            )
+        }),
+        disabled: Box::new(|theme| rectangular(theme.disabled(&Button::Standard), false, theme)),
     }
 }

@@ -44,3 +44,6 @@ past-due = Overdue
 no-date = No due date
 board = Board
 help = Help
+filter = Filter
+move-left = Move left
+move-right = Move right

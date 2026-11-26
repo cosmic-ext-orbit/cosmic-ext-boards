@@ -21,6 +21,7 @@ pub struct Page {
     editor: Option<Editor>,
     name: Option<(NameTarget, String)>,
     search: String,
+    show_filters: bool,
     label: Option<String>,
     due: DueFilter,
     archive: bool,
@@ -118,6 +119,7 @@ pub enum Message {
     CompleteColumn(Id, bool),
     Archive(Id, bool),
     Search(String),
+    ToggleFilters,
     FilterLabel(Option<String>),
     FilterDue(DueFilter),
     ShowArchive,
@@ -285,6 +287,7 @@ impl Page {
                 self.archive = true;
             }
             Message::Search(value) => self.search = value,
+            Message::ToggleFilters => self.show_filters = !self.show_filters,
             Message::FilterLabel(value) => self.label = value,
             Message::FilterDue(value) => self.due = value,
             Message::DragEntered(target) => self.drop_target = Some(target),
