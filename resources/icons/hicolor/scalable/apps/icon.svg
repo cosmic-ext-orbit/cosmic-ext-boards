@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">Boards</title>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#244B67"/>
+      <stop offset="1" stop-color="#183148"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="20" width="112" height="88" rx="15" fill="#7AC5D1"/>
+  <rect x="14" y="26" width="100" height="76" rx="10" fill="url(#surface)"/>
+
+  <g fill="#365B74">
+    <rect x="20" y="32" width="25" height="64" rx="5"/>
+    <rect x="51.5" y="32" width="25" height="64" rx="5"/>
+    <rect x="83" y="32" width="25" height="64" rx="5"/>
+  </g>
+  <g fill="#7899AB">
+    <rect x="23" y="37" width="19" height="4" rx="2"/>
+    <rect x="54.5" y="37" width="19" height="4" rx="2"/>
+    <rect x="86" y="37" width="19" height="4" rx="2"/>
+  </g>
+
+  <g fill="#C0E9F0">
+    <rect x="23" y="47" width="19" height="16" rx="3.5"/>
+    <rect x="23" y="69" width="19" height="16" rx="3.5"/>
+    <rect x="54.5" y="69" width="19" height="16" rx="3.5"/>
+  </g>
+  <rect x="54.5" y="47" width="19" height="16" rx="3.5" fill="#FFC775"/>
+  <rect x="86" y="47" width="19" height="16" rx="3.5" fill="#8CE8CC"/>
+</svg>

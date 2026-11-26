@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Boards
+Comment=A Kanban app for the COSMIC™ desktop.
+Type=Application
+Icon=dev.edfloreshz.Boards
+Exec=cosmic-ext-boards %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC
+MimeType=
