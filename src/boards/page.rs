@@ -1,8 +1,10 @@
-use cosmic::Element;
-use cosmic::app::context_drawer::{self, ContextDrawer};
-use cosmic::iced::{Alignment, Length, widget::scrollable};
-use cosmic::widget::{self, button, checkbox, text, text_input};
-use jiff::{Zoned, civil::Date};
+mod view;
+
+use std::sync::LazyLock;
+
+use cosmic::iced::Task;
+use cosmic::widget::{Id as WidgetId, calendar::CalendarModel, text_editor, text_input};
+use jiff::{ToSpan, ZonedDateTime, civil::Date};
 
 use super::{
     Board, Boards, Card, ChecklistItem, Column, Id,
@@ -10,12 +12,17 @@ use super::{
 };
 use crate::fl;
 
+static NAME_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
+static CARD_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
+
 #[derive(Default)]
 pub struct Page {
     composer: Option<(Id, String)>,
     editor: Option<Editor>,
     name: Option<(NameTarget, String)>,
     search: String,
+    label: Option<String>,
+    due: DueFilter,
     archive: bool,
     drop_target: Option<Target>,
     drag_widgets: drag::Widgets,
@@ -26,8 +33,46 @@ pub struct Page {
 struct Editor {
     card: Card,
     date: String,
+    calendar: Option<CalendarModel>,
+    description: text_editor::Content<cosmic::Renderer>,
     item: String,
     labels: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DueFilter {
+    #[default]
+    All,
+    Upcoming,
+    Overdue,
+    None,
+}
+
+impl DueFilter {
+    const OPTIONS: [Self; 4] = [Self::All, Self::Upcoming, Self::Overdue, Self::None];
+
+    fn label(self) -> String {
+        match self {
+            Self::All => fl!("any-date"),
+            Self::Upcoming => fl!("upcoming"),
+            Self::Overdue => fl!("past-due"),
+            Self::None => fl!("no-date"),
+        }
+    }
+
+    fn matches(self, card: &Card, complete: bool, today: Date) -> bool {
+        match self {
+            Self::All => true,
+            Self::Upcoming => {
+                !complete
+                    && card.due.is_some_and(|date| {
+                        date >= today && date.since(today).is_ok_and(|span| span.get_days() <= 7)
+                    })
+            }
+            Self::Overdue => !complete && card.due.is_some_and(|date| date < today),
+            Self::None => card.due.is_none(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,10 +93,14 @@ pub enum Message {
     Compose(Id),
     Title(String),
     AddCard,
+    CancelCard,
     Open(Id),
     Close,
     EditTitle(String),
-    Description(String),
+    Description(text_editor::Action),
+    ToggleCalendar,
+    CalendarMonth(bool),
+    SelectDate(Date),
     Date(String),
     Labels(String),
     Item(String),
@@ -59,7 +108,7 @@ pub enum Message {
     ToggleItem(Id, bool),
     RemoveItem(Id),
     SaveCard,
-    Move(Id, Id, Option<Id>),
+    MoveToColumn(Id, Id),
     DragEntered(Target),
     DragLeft(Target),
     DragEnded,
@@ -69,6 +118,8 @@ pub enum Message {
     CompleteColumn(Id, bool),
     Archive(Id, bool),
     Search(String),
+    FilterLabel(Option<String>),
+    FilterDue(DueFilter),
     ShowArchive,
     Reload,
     Retry,
@@ -78,6 +129,23 @@ pub enum Message {
 impl Page {
     pub fn update_drag_widgets(&mut self, board: Option<&Board>) {
         self.drag_widgets.update(board);
+    }
+
+    pub fn focus(&self, message: &Message) -> Task<Message> {
+        match message {
+            Message::NewBoard | Message::Name(_) if self.name.is_some() => {
+                text_input::focus(NAME_INPUT.clone())
+            }
+            Message::Compose(id)
+                if self
+                    .composer
+                    .as_ref()
+                    .is_some_and(|(column, _)| column == id) =>
+            {
+                text_input::focus(CARD_INPUT.clone())
+            }
+            _ => Task::none(),
+        }
     }
 
     pub fn reset(&mut self) {
@@ -172,6 +240,7 @@ impl Page {
                 return true;
             }
             Message::Compose(id) => self.composer = Some((id, String::new())),
+            Message::CancelCard => self.composer = None,
             Message::Title(title) => {
                 if let Some((_, value)) = &mut self.composer {
                     *value = title;
@@ -200,6 +269,8 @@ impl Page {
                     self.editor = Some(Editor {
                         card: card.clone(),
                         date: card.due.map_or_else(String::new, |date| date.to_string()),
+                        calendar: None,
+                        description: text_editor::Content::with_text(&card.description),
                         item: String::new(),
                         labels: card.labels.join(", "),
                     });
@@ -214,6 +285,8 @@ impl Page {
                 self.archive = true;
             }
             Message::Search(value) => self.search = value,
+            Message::FilterLabel(value) => self.label = value,
+            Message::FilterDue(value) => self.due = value,
             Message::DragEntered(target) => self.drop_target = Some(target),
             Message::DragLeft(target) => {
                 if self.drop_target == Some(target) {
@@ -227,10 +300,14 @@ impl Page {
                     .active_mut()
                     .is_some_and(|board| board.move_card(id, target.column, target.before));
             }
-            Message::Move(id, column, before) => {
-                return boards
-                    .active_mut()
-                    .is_some_and(|board| board.move_card(id, column, before));
+            Message::MoveToColumn(id, column) => {
+                let Some(board) = boards.active_mut() else {
+                    return false;
+                };
+                return board
+                    .card(id)
+                    .is_some_and(|(source, _)| source.id != column)
+                    && board.move_card(id, column, None);
             }
             Message::Shift(id, column, down) => {
                 let Some(board) = boards.active_mut() else {
@@ -310,7 +387,30 @@ impl Page {
         };
         match message {
             Message::EditTitle(value) => editor.card.title = value,
-            Message::Description(value) => editor.card.description = value,
+            Message::Description(action) => editor.description.perform(action),
+            Message::ToggleCalendar => {
+                editor.calendar = if editor.calendar.is_some() {
+                    None
+                } else {
+                    let date = editor
+                        .date
+                        .parse()
+                        .unwrap_or_else(|_| ZonedDateTime::now().date());
+                    Some(CalendarModel::new(date, date))
+                };
+            }
+            Message::CalendarMonth(next) => {
+                if let Some(calendar) = &mut editor.calendar {
+                    let step = if next { 1 } else { -1 };
+                    if let Ok(date) = calendar.visible.checked_add(step.months()) {
+                        calendar.visible = date;
+                    }
+                }
+            }
+            Message::SelectDate(date) => {
+                editor.date = date.to_string();
+                editor.calendar = None;
+            }
             Message::Date(value) => editor.date = value,
             Message::Labels(value) => editor.labels = value,
             Message::Item(value) => editor.item = value,
@@ -336,6 +436,7 @@ impl Page {
                     return false;
                 };
                 editor.card.title = editor.card.title.trim().into();
+                editor.card.description = editor.description.text();
                 editor.card.due = editor.date.trim().parse().ok();
                 editor.card.labels = editor
                     .labels
@@ -354,345 +455,6 @@ impl Page {
             _ => {}
         }
         false
-    }
-
-    pub fn dialog(&self) -> Option<Element<'_, Message>> {
-        let (target, value) = self.name.as_ref()?;
-        let title = match target {
-            NameTarget::Board => fl!("new-board"),
-            NameTarget::RenameBoard => fl!("rename-board"),
-            NameTarget::Column => fl!("new-column"),
-            NameTarget::RenameColumn(_) => fl!("rename-column"),
-        };
-        let save = button::suggested(fl!("save"));
-        let mut input = text_input(fl!("name"), value).on_input(Message::NameChanged);
-        let save = if value.trim().is_empty() {
-            save
-        } else {
-            input = input.on_submit(|_| Message::SaveName);
-            save.on_press(Message::SaveName)
-        };
-        Some(
-            widget::dialog()
-                .title(title)
-                .control(input)
-                .primary_action(save)
-                .secondary_action(button::standard(fl!("cancel")).on_press(Message::CancelName))
-                .into(),
-        )
-    }
-
-    pub fn view<'a>(&'a self, board: Option<&'a Board>) -> Element<'a, Message> {
-        let spacing = cosmic::theme::spacing();
-        let mut content = widget::column::with_capacity(3)
-            .spacing(spacing.space_m)
-            .padding(spacing.space_m);
-        if let Some(error) = &self.error {
-            let mut status = widget::row::with_capacity(3)
-                .spacing(spacing.space_xs)
-                .push(text::body(fl!("storage-error", error = error.as_str())));
-            if self.pending.is_some() {
-                status = status
-                    .push(button::standard(fl!("retry")).on_press(Message::Retry))
-                    .push(button::text(fl!("discard")).on_press(Message::Discard));
-            } else {
-                status = status.push(button::standard(fl!("retry")).on_press(Message::Reload));
-            }
-            content = content.push(status);
-        }
-        let Some(board) = board else {
-            return content.push(text::title2(fl!("no-boards"))).into();
-        };
-        let actions = widget::row::with_capacity(4)
-            .spacing(spacing.space_xs)
-            .push(
-                button::text(fl!("rename-board")).on_press(Message::Name(NameTarget::RenameBoard)),
-            )
-            .push(button::text(fl!("new-column")).on_press(Message::Name(NameTarget::Column)))
-            .push(button::text(fl!("archive")).on_press(Message::ShowArchive))
-            .push(text_input(fl!("search"), &self.search).on_input(Message::Search));
-        let today = Zoned::now().date();
-        let columns = board.columns.iter().fold(
-            widget::row::with_capacity(board.columns.len())
-                .spacing(spacing.space_s)
-                .height(Length::Fill),
-            |row, column| row.push(self.column(board, column, today)),
-        );
-        content
-            .push(text::title1(&board.name))
-            .push(actions)
-            .push(
-                widget::scrollable(columns)
-                    .direction(scrollable::Direction::Horizontal(
-                        scrollable::Scrollbar::default(),
-                    ))
-                    .height(Length::Fill),
-            )
-            .height(Length::Fill)
-            .into()
-    }
-
-    fn column<'a>(
-        &'a self,
-        board: &'a Board,
-        column: &'a Column,
-        today: Date,
-    ) -> Element<'a, Message> {
-        let spacing = cosmic::theme::spacing();
-        let index = board
-            .columns
-            .iter()
-            .position(|entry| entry.id == column.id)
-            .unwrap();
-        let header = widget::row::with_capacity(3)
-            .spacing(spacing.space_xxs)
-            .align_y(Alignment::Center)
-            .push(
-                button::text(&column.name)
-                    .on_press(Message::Name(NameTarget::RenameColumn(column.id))),
-            )
-            .push(
-                button::text("←")
-                    .on_press_maybe((index > 0).then_some(Message::ShiftColumn(column.id, false))),
-            )
-            .push(button::text("→").on_press_maybe(
-                (index + 1 < board.columns.len()).then_some(Message::ShiftColumn(column.id, true)),
-            ));
-        let query = self.search.trim().to_lowercase();
-        let cards = column
-            .cards
-            .iter()
-            .filter(|card| {
-                !card.archived
-                    && (query.is_empty()
-                        || card.title.to_lowercase().contains(&query)
-                        || card.description.to_lowercase().contains(&query)
-                        || card
-                            .labels
-                            .iter()
-                            .any(|label| label.to_lowercase().contains(&query)))
-            })
-            .fold(
-                widget::column::with_capacity(column.cards.len()).spacing(spacing.space_xxs),
-                |list, card| {
-                    let mut details = Vec::new();
-                    if !card.checklist.is_empty() {
-                        let done = card.checklist.iter().filter(|item| item.checked).count();
-                        details.push(format!("{done}/{}", card.checklist.len()));
-                    }
-                    if let Some(due) = card.due {
-                        details.push(if due < today && !column.complete {
-                            fl!("overdue", date = due.to_string())
-                        } else {
-                            due.to_string()
-                        });
-                    }
-                    if !card.labels.is_empty() {
-                        details.push(card.labels.join(", "));
-                    }
-                    let label = widget::column::with_capacity(2).push(text::body(&card.title));
-                    let label = if details.is_empty() {
-                        label
-                    } else {
-                        label.push(text::caption(details.join(" · ")))
-                    };
-                    let handle = drag::handle(
-                        card.id,
-                        self.drag_widgets.sources[&card.id].clone(),
-                        widget::container(
-                            widget::icon::from_name("list-drag-handle-symbolic")
-                                .size(16)
-                                .icon(),
-                        )
-                        .padding(spacing.space_xxs),
-                    );
-                    let row = widget::row::with_capacity(2)
-                        .align_y(Alignment::Center)
-                        .push(handle)
-                        .push(
-                            button::custom(label)
-                                .width(Length::Fill)
-                                .on_press(Message::Open(card.id)),
-                        );
-                    let target = Target {
-                        column: column.id,
-                        before: Some(card.id),
-                    };
-                    list.push(
-                        target.view(
-                            self.drag_widgets.destinations[&target].clone(),
-                            widget::column::with_capacity(2)
-                                .push(self.insertion_line(target))
-                                .push(row),
-                        ),
-                    )
-                },
-            );
-        let end = Target {
-            column: column.id,
-            before: None,
-        };
-        let cards = cards.push(
-            end.view(
-                self.drag_widgets.destinations[&end].clone(),
-                widget::column::with_capacity(2)
-                    .push(self.insertion_line(end))
-                    .push(cosmic::iced::widget::space().width(Length::Fill).height(32)),
-            ),
-        );
-        let add: Element<_> = match &self.composer {
-            Some((id, value)) if *id == column.id => text_input(fl!("card-title"), value)
-                .on_input(Message::Title)
-                .on_submit(|_| Message::AddCard)
-                .into(),
-            _ => button::standard(fl!("add-card"))
-                .on_press(Message::Compose(column.id))
-                .into(),
-        };
-        widget::container(
-            widget::column::with_capacity(4)
-                .spacing(spacing.space_xs)
-                .push(header)
-                .push(
-                    checkbox(column.complete)
-                        .label(fl!("completed-column"))
-                        .on_toggle(move |complete| Message::CompleteColumn(column.id, complete)),
-                )
-                .push(widget::scrollable(cards).height(Length::Fill))
-                .push(add),
-        )
-        .padding(spacing.space_s)
-        .width(260)
-        .height(Length::Fill)
-        .class(cosmic::theme::Container::Card)
-        .into()
-    }
-
-    fn insertion_line(&self, target: Target) -> Element<'_, Message> {
-        let active = self.drop_target == Some(target);
-        widget::container(cosmic::iced::widget::space())
-            .width(Length::Fill)
-            .height(3)
-            .style(
-                move |theme: &cosmic::Theme| cosmic::iced::widget::container::Style {
-                    background: active.then(|| {
-                        cosmic::iced::Background::Color(theme.cosmic().accent_color().into())
-                    }),
-                    ..Default::default()
-                },
-            )
-            .into()
-    }
-
-    pub fn drawer<'a>(&'a self, board: &'a Board) -> Option<ContextDrawer<'a, Message>> {
-        let spacing = cosmic::theme::spacing();
-        if self.archive {
-            let mut content = widget::column::with_capacity(4).spacing(spacing.space_xs);
-            for card in board
-                .columns
-                .iter()
-                .flat_map(|column| &column.cards)
-                .filter(|card| card.archived)
-            {
-                content = content.push(
-                    widget::row::with_capacity(2)
-                        .spacing(spacing.space_s)
-                        .push(text::body(&card.title))
-                        .push(
-                            button::text(fl!("restore")).on_press(Message::Archive(card.id, false)),
-                        ),
-                );
-            }
-            if !board
-                .columns
-                .iter()
-                .flat_map(|column| &column.cards)
-                .any(|card| card.archived)
-            {
-                content = content.push(text::body(fl!("archive-empty")));
-            }
-            return Some(
-                context_drawer::context_drawer(content, Message::Close).title(fl!("archive")),
-            );
-        }
-        let editor = self.editor.as_ref()?;
-        let id = editor.card.id;
-        let (column, card) = board.card(id)?;
-        let destinations: Vec<_> = board
-            .columns
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect();
-        let selected = board.columns.iter().position(|entry| entry.id == column.id);
-        let column_ids: Vec<_> = board.columns.iter().map(|entry| entry.id).collect();
-        let items = editor.card.checklist.iter().fold(
-            widget::column::with_capacity(editor.card.checklist.len()).spacing(spacing.space_xxs),
-            |list, item| {
-                let item_id = item.id;
-                list.push(
-                    widget::row::with_capacity(2)
-                        .spacing(spacing.space_xxs)
-                        .push(
-                            checkbox(item.checked)
-                                .label(&item.text)
-                                .on_toggle(move |checked| Message::ToggleItem(item_id, checked)),
-                        )
-                        .push(button::text(fl!("remove")).on_press(Message::RemoveItem(item_id))),
-                )
-            },
-        );
-        let content = widget::column::with_capacity(13)
-            .spacing(spacing.space_xs)
-            .push(text::body(fl!("status")))
-            .push(widget::dropdown(destinations, selected, move |index| {
-                Message::Move(id, column_ids[index], None)
-            }))
-            .push(
-                widget::row::with_capacity(2)
-                    .spacing(spacing.space_xs)
-                    .push(
-                        button::text(fl!("move-up")).on_press(Message::Shift(id, column.id, false)),
-                    )
-                    .push(
-                        button::text(fl!("move-down"))
-                            .on_press(Message::Shift(id, column.id, true)),
-                    ),
-            )
-            .push(text::body(fl!("card-title")))
-            .push(text_input(fl!("card-title"), &editor.card.title).on_input(Message::EditTitle))
-            .push(text::body(fl!("description")))
-            .push(
-                text_input(fl!("description"), &editor.card.description)
-                    .on_input(Message::Description),
-            )
-            .push(text::body(fl!("due-date")))
-            .push(text_input("YYYY-MM-DD", &editor.date).on_input(Message::Date))
-            .push(text::body(fl!("labels")))
-            .push(text_input(fl!("labels"), &editor.labels).on_input(Message::Labels))
-            .push(text::title4(fl!("checklist")))
-            .push(items)
-            .push(
-                widget::row::with_capacity(2)
-                    .spacing(spacing.space_xxs)
-                    .push(
-                        text_input(fl!("checklist-item"), &editor.item)
-                            .on_input(Message::Item)
-                            .on_submit(|_| Message::AddItem),
-                    )
-                    .push(button::standard(fl!("add")).on_press(Message::AddItem)),
-            );
-        let footer = widget::row::with_capacity(2)
-            .spacing(spacing.space_xs)
-            .push(
-                button::suggested(fl!("save"))
-                    .on_press_maybe(editor.valid().then_some(Message::SaveCard)),
-            )
-            .push(button::text(fl!("archive")).on_press(Message::Archive(id, true)));
-        Some(
-            context_drawer::context_drawer(content, Message::Close)
-                .title(&card.title)
-                .footer(footer),
-        )
     }
 }
 

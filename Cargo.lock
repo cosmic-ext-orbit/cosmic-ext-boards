@@ -948,7 +948,7 @@ dependencies = [
  "directories",
  "i18n-embed",
  "i18n-embed-fl",
- "jiff 0.2.38",
+ "jiff 1.0.3",
  "libcosmic",
  "open",
  "rusqlite",

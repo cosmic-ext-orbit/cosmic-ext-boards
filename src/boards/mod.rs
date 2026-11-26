@@ -7,4 +7,4 @@ pub use model::*;
 pub use storage::Store;
 mod page;
 
-pub use page::{Message, Page};
+pub use page::{Message, NameTarget, Page};

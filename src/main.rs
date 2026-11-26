@@ -10,11 +10,13 @@ fn main() -> cosmic::iced::Result {
 
     i18n::init(&requested_languages);
 
-    let settings = cosmic::app::Settings::default().size_limits(
-        cosmic::iced::Limits::NONE
-            .min_width(360.0)
-            .min_height(180.0),
-    );
+    let settings = cosmic::app::Settings::default()
+        .size(cosmic::iced::Size::new(1240.0, 760.0))
+        .size_limits(
+            cosmic::iced::Limits::NONE
+                .min_width(360.0)
+                .min_height(180.0),
+        );
 
     cosmic::app::run::<app::AppModel>(settings, ())
 }

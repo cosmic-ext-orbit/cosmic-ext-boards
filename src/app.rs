@@ -2,9 +2,9 @@
 
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::prelude::*;
-use cosmic::widget::{self, about::About, nav_bar};
+use cosmic::widget::{self, about::About, menu, nav_bar};
 
-use crate::boards::{Board, Boards, Id, Store};
+use crate::boards::{Board, Boards, Id, Message as BoardMessage, NameTarget, Page, Store};
 use crate::fl;
 
 pub struct AppModel {
@@ -14,12 +14,12 @@ pub struct AppModel {
     boards: Boards,
     store: Option<Store>,
     nav: nav_bar::Model,
-    page: crate::boards::Page,
+    page: Page,
 }
 
 #[derive(Clone, Debug)]
 pub enum Message {
-    Board(crate::boards::Message),
+    Board(BoardMessage),
     About,
     OpenUrl(String),
 }
@@ -54,7 +54,7 @@ impl cosmic::Application for AppModel {
             boards: Boards::default(),
             store: None,
             nav: nav_bar::Model::default(),
-            page: crate::boards::Page::default(),
+            page: Page::default(),
         };
         app.load();
         let task = app
@@ -80,14 +80,35 @@ impl cosmic::Application for AppModel {
         Task::none()
     }
 
-    fn header_end(&self) -> Vec<Element<'_, Message>> {
+    fn header_start(&self) -> Vec<Element<'_, Message>> {
+        let keys = Default::default();
+        let mut board = vec![menu::Item::Button(
+            fl!("new-board"),
+            None,
+            MenuAction::NewBoard,
+        )];
+        if self.boards.active().is_some() {
+            board.extend([
+                menu::Item::Button(fl!("rename-board"), None, MenuAction::RenameBoard),
+                menu::Item::Button(fl!("new-column"), None, MenuAction::NewColumn),
+                menu::Item::Button(fl!("archive"), None, MenuAction::Archive),
+            ]);
+        }
         vec![
-            widget::button::text(fl!("about"))
-                .on_press(Message::About)
-                .into(),
-            widget::button::suggested(fl!("new-board"))
-                .on_press(Message::Board(crate::boards::Message::NewBoard))
-                .into(),
+            menu::bar(vec![
+                menu::Tree::with_children(
+                    Element::from(menu::root(fl!("board"))),
+                    menu::items(&keys, board),
+                ),
+                menu::Tree::with_children(
+                    Element::from(menu::root(fl!("help"))),
+                    menu::items(
+                        &keys,
+                        vec![menu::Item::Button(fl!("about"), None, MenuAction::About)],
+                    ),
+                ),
+            ])
+            .into(),
         ]
     }
 
@@ -127,22 +148,24 @@ impl cosmic::Application for AppModel {
             }
             Message::Board(message) => message,
         };
-        if matches!(
-            message,
-            crate::boards::Message::Open(_) | crate::boards::Message::ShowArchive
-        ) {
+        if matches!(message, BoardMessage::Open(_) | BoardMessage::ShowArchive) {
             self.show_about = false;
         }
-        if matches!(message, crate::boards::Message::Reload) {
+        let mut task = Task::none();
+        if matches!(message, BoardMessage::Reload) {
             self.load();
         } else if self.store.is_some() {
             let mut next = self.boards.clone();
-            if self.page.update(&mut next, message) {
+            if self.page.update(&mut next, message.clone()) {
                 self.save(next);
             }
+            task = self
+                .page
+                .focus(&message)
+                .map(|message| cosmic::Action::App(Message::Board(message)));
         }
         self.core.window.show_context = self.show_about || self.page.show_drawer();
-        Task::none()
+        task
     }
 }
 
@@ -207,5 +230,28 @@ impl AppModel {
                 item.activate();
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MenuAction {
+    NewBoard,
+    RenameBoard,
+    NewColumn,
+    Archive,
+    About,
+}
+
+impl menu::action::MenuAction for MenuAction {
+    type Message = Message;
+
+    fn message(&self) -> Message {
+        Message::Board(match self {
+            Self::NewBoard => BoardMessage::NewBoard,
+            Self::RenameBoard => BoardMessage::Name(NameTarget::RenameBoard),
+            Self::NewColumn => BoardMessage::Name(NameTarget::Column),
+            Self::Archive => BoardMessage::ShowArchive,
+            Self::About => return Message::About,
+        })
     }
 }
