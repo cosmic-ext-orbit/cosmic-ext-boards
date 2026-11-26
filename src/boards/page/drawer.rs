@@ -2,7 +2,7 @@ use cosmic::Element;
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::iced::Length;
 use cosmic::widget::{
-    self, TextEditor, button, checkbox, divider, icon, popover, settings, text, text_input,
+    self, TextEditor, button, checkbox, icon, popover, settings, text, text_input,
 };
 use jiff::civil::Weekday;
 
@@ -41,50 +41,46 @@ impl Page {
         .on_input(Message::EditTitle)
         .on_submit(|_| Message::EditTitleActive(false));
 
-        let content = settings::view_column(vec![
-            widget::column::with_capacity(3)
-                .spacing(spacing.space_xs)
-                .push(settings::item_row(vec![
-                    field_label(
-                        symbolic_svg(include_bytes!(
+        let fields = settings::section()
+            .add(
+                settings::item::builder(fl!("status"))
+                    .icon(
+                        widget::icon(symbolic_svg(include_bytes!(
                             "../../../resources/icons/board-symbolic.svg"
-                        )),
-                        fl!("status"),
-                    ),
-                    widget::space::horizontal().into(),
-                    widget::dropdown(destinations, selected, move |index| {
-                        Message::MoveToColumn(id, ids[index])
-                    })
+                        )))
+                        .size(16),
+                    )
+                    .control(field_control(widget::dropdown(
+                        destinations,
+                        selected,
+                        move |index| Message::MoveToColumn(id, ids[index]),
+                    ))),
+            )
+            .add(due_date(editor));
+        let description = settings::section()
+            .title(fl!("description"))
+            .add(settings::item_row(vec![
+                TextEditor::new(&editor.description)
+                    .placeholder(fl!("description"))
+                    .height(90)
+                    .style(editor_style)
+                    .on_action(Message::Description)
                     .into(),
-                ]))
-                .push(due_date(editor))
-                .into(),
-            divider::horizontal::light().into(),
-            widget::column::with_capacity(2)
-                .spacing(spacing.space_xs)
-                .push(text::heading(fl!("description")))
-                .push(
-                    TextEditor::new(&editor.description)
-                        .placeholder(fl!("description"))
-                        .height(90)
-                        .style(editor_style)
-                        .on_action(Message::Description),
-                )
-                .into(),
-            widget::column::with_capacity(2)
-                .spacing(spacing.space_xs)
-                .push(text::heading(fl!("labels")))
-                .push(editor.labels.view(
-                    fl!("add-label"),
-                    fl!("add-label"),
-                    |label| fl!("remove-label", label = label),
-                    Message::Labels,
-                ))
-                .into(),
-            divider::horizontal::light().into(),
+            ]));
+        let labels = settings::section()
+            .title(fl!("labels"))
+            .add(settings::item_row(vec![editor.labels.view(
+                fl!("add-label"),
+                fl!("add-label"),
+                |label| fl!("remove-label", label = label),
+                Message::Labels,
+            )]));
+        let content = settings::view_column(vec![
+            fields.into(),
+            description.into(),
+            labels.into(),
             checklist(editor),
-        ])
-        .spacing(spacing.space_s);
+        ]);
 
         let footer = widget::row::with_capacity(5)
             .spacing(spacing.space_xxs)
@@ -116,7 +112,7 @@ impl Page {
     }
 }
 
-fn due_date(editor: &Editor) -> Element<'_, Message> {
+fn due_date(editor: &Editor) -> widget::Row<'_, Message, cosmic::Theme> {
     let button =
         action("x-office-calendar-symbolic", fl!("choose-date")).on_press(Message::ToggleCalendar);
     let mut date = popover(button)
@@ -135,33 +131,27 @@ fn due_date(editor: &Editor) -> Element<'_, Message> {
             .class(cosmic::theme::Container::Card),
         );
     }
-    settings::item_row(vec![
-        field_label(
-            icon::from_name("x-office-calendar-symbolic"),
-            fl!("due-date"),
-        ),
-        text_input("YYYY-MM-DD", &editor.date)
-            .on_input(Message::Date)
-            .into(),
-        date.into(),
-        action("edit-clear-symbolic", fl!("clear-date"))
-            .on_press_maybe((!editor.date.is_empty()).then(|| Message::Date(String::new())))
-            .into(),
-    ])
-    .into()
+    settings::item::builder(fl!("due-date"))
+        .icon(
+            icon::from_name("x-office-calendar-symbolic")
+                .size(16)
+                .icon(),
+        )
+        .control(field_control(settings::item_row(vec![
+            text_input("YYYY-MM-DD", &editor.date)
+                .on_input(Message::Date)
+                .into(),
+            date.into(),
+            action("edit-clear-symbolic", fl!("clear-date"))
+                .on_press_maybe((!editor.date.is_empty()).then(|| Message::Date(String::new())))
+                .into(),
+        ])))
 }
 
 fn checklist(editor: &Editor) -> Element<'_, Message> {
-    let spacing = cosmic::theme::spacing();
-    let mut items = widget::column::with_capacity(editor.card.checklist.len() + 2)
-        .spacing(spacing.space_xxs)
-        .push(field_label(
-            icon::from_name("object-select-symbolic"),
-            fl!("checklist"),
-        ));
-    for item in &editor.card.checklist {
+    let items = editor.card.checklist.iter().map(|item| {
         let id = item.id;
-        items = items.push(settings::item_row(vec![
+        settings::item_row(vec![
             checkbox(item.checked)
                 .label(&item.text)
                 .width(Length::Fill)
@@ -170,10 +160,12 @@ fn checklist(editor: &Editor) -> Element<'_, Message> {
             action("edit-delete-symbolic", fl!("remove"))
                 .on_press(Message::RemoveItem(id))
                 .into(),
-        ]));
-    }
-    items
-        .push(settings::item_row(vec![
+        ])
+    });
+    settings::section()
+        .title(fl!("checklist"))
+        .extend(items)
+        .add(settings::item_row(vec![
             text_input(fl!("checklist-item"), &editor.item)
                 .on_input(Message::Item)
                 .on_submit(|_| Message::AddItem)
@@ -209,11 +201,6 @@ fn archive(board: &Board) -> ContextDrawer<'_, Message> {
     .title(fl!("archive"))
 }
 
-fn field_label(icon: impl Into<icon::Handle>, label: String) -> Element<'static, Message> {
-    settings::item_row(vec![
-        widget::icon(icon.into()).size(16).into(),
-        text::body(label).into(),
-    ])
-    .width(Length::Shrink)
-    .into()
+fn field_control<'a>(control: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    widget::container(control).width(172).into()
 }
