@@ -224,12 +224,15 @@ impl AppModel {
 
     fn update_nav(&mut self) {
         self.nav = nav_bar::Model::default();
+        let icon =
+            widget::icon::from_svg_bytes(include_bytes!("../resources/icons/board-symbolic.svg"))
+                .symbolic(true);
         for Board { id, name, .. } in &self.boards.boards {
             let item = self
                 .nav
                 .insert()
                 .text(name.clone())
-                .icon(widget::icon::from_name("folder-symbolic"))
+                .icon(icon.clone().icon())
                 .data(*id);
             if Some(*id) == self.boards.selected {
                 item.activate();
