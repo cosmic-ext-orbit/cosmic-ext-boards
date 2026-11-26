@@ -75,15 +75,16 @@ impl cosmic::Application for AppModel {
         if let Some(&id) = self.nav.data::<Id>(id) {
             let mut boards = self.boards.clone();
             boards.selected = Some(id);
-            if self.save(boards) {
-                self.close_drawer();
-            }
+            self.save(boards);
         }
         Task::none()
     }
 
     fn header_end(&self) -> Vec<Element<'_, Message>> {
         vec![
+            widget::button::text(fl!("about"))
+                .on_press(Message::About)
+                .into(),
             widget::button::suggested(fl!("new-board"))
                 .on_press(Message::Board(crate::boards::Message::NewBoard))
                 .into(),
@@ -155,6 +156,7 @@ impl AppModel {
                 self.boards = boards;
                 self.store = Some(store);
                 self.page.error = None;
+                self.page.update_drag_widgets(self.boards.active());
                 self.update_nav();
             }
             Err(error) => self.page.error = Some(error.to_string()),
@@ -177,6 +179,7 @@ impl AppModel {
                 if switched {
                     self.close_drawer();
                 }
+                self.page.update_drag_widgets(self.boards.active());
                 if changed {
                     self.update_nav();
                 }

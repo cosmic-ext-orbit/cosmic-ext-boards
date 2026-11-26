@@ -1,3 +1,5 @@
+mod drag;
+
 mod model;
 mod storage;
 

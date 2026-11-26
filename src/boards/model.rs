@@ -152,3 +152,39 @@ impl Card {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moves_use_the_current_anchor_and_preserve_other_card_order() {
+        let mut source = Column::new("To Do".into(), false);
+        source.cards = ["First", "Hidden", "Last"]
+            .map(|title| Card::new(title.into()))
+            .into();
+        let [first, hidden, last] = source.cards.iter().map(|card| card.id).collect::<Vec<_>>()[..]
+        else {
+            unreachable!();
+        };
+        let target = Column::new("Done".into(), true);
+        let (source_id, target_id) = (source.id, target.id);
+        let mut board = Board::new("Release".into(), vec![source, target]);
+
+        assert!(board.move_card(first, source_id, Some(last)));
+        assert_eq!(
+            board.columns[0]
+                .cards
+                .iter()
+                .map(|card| card.id)
+                .collect::<Vec<_>>(),
+            [hidden, first, last]
+        );
+        assert!(!board.move_card(first, target_id, Some(last)));
+        assert!(!board.move_card(first, source_id, Some(first)));
+        assert!(board.move_card(first, target_id, None));
+        assert_eq!(board.card(first).unwrap().0.id, target_id);
+        assert!(board.move_card(first, source_id, Some(hidden)));
+        assert_eq!(board.columns[0].cards[0].id, first);
+    }
+}

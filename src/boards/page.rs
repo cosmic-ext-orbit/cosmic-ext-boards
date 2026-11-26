@@ -4,7 +4,10 @@ use cosmic::iced::{Alignment, Length, widget::scrollable};
 use cosmic::widget::{self, button, checkbox, text, text_input};
 use jiff::{Zoned, civil::Date};
 
-use super::{Board, Boards, Card, ChecklistItem, Column, Id};
+use super::{
+    Board, Boards, Card, ChecklistItem, Column, Id,
+    drag::{self, Target},
+};
 use crate::fl;
 
 #[derive(Default)]
@@ -14,6 +17,8 @@ pub struct Page {
     name: Option<(NameTarget, String)>,
     search: String,
     archive: bool,
+    drop_target: Option<Target>,
+    drag_widgets: drag::Widgets,
     pub error: Option<String>,
     pub pending: Option<Boards>,
 }
@@ -55,6 +60,10 @@ pub enum Message {
     RemoveItem(Id),
     SaveCard,
     Move(Id, Id, Option<Id>),
+    DragEntered(Target),
+    DragLeft(Target),
+    DragEnded,
+    Drop(Id, Target),
     Shift(Id, Id, bool),
     ShiftColumn(Id, bool),
     CompleteColumn(Id, bool),
@@ -67,6 +76,10 @@ pub enum Message {
 }
 
 impl Page {
+    pub fn update_drag_widgets(&mut self, board: Option<&Board>) {
+        self.drag_widgets.update(board);
+    }
+
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -201,6 +214,19 @@ impl Page {
                 self.archive = true;
             }
             Message::Search(value) => self.search = value,
+            Message::DragEntered(target) => self.drop_target = Some(target),
+            Message::DragLeft(target) => {
+                if self.drop_target == Some(target) {
+                    self.drop_target = None;
+                }
+            }
+            Message::DragEnded => self.drop_target = None,
+            Message::Drop(id, target) => {
+                self.drop_target = None;
+                return boards
+                    .active_mut()
+                    .is_some_and(|board| board.move_card(id, target.column, target.before));
+            }
             Message::Move(id, column, before) => {
                 return boards
                     .active_mut()
@@ -470,13 +496,50 @@ impl Page {
                     } else {
                         label.push(text::caption(details.join(" · ")))
                     };
+                    let handle = drag::handle(
+                        card.id,
+                        self.drag_widgets.sources[&card.id].clone(),
+                        widget::container(
+                            widget::icon::from_name("list-drag-handle-symbolic")
+                                .size(16)
+                                .icon(),
+                        )
+                        .padding(spacing.space_xxs),
+                    );
+                    let row = widget::row::with_capacity(2)
+                        .align_y(Alignment::Center)
+                        .push(handle)
+                        .push(
+                            button::custom(label)
+                                .width(Length::Fill)
+                                .on_press(Message::Open(card.id)),
+                        );
+                    let target = Target {
+                        column: column.id,
+                        before: Some(card.id),
+                    };
                     list.push(
-                        button::custom(label)
-                            .width(Length::Fill)
-                            .on_press(Message::Open(card.id)),
+                        target.view(
+                            self.drag_widgets.destinations[&target].clone(),
+                            widget::column::with_capacity(2)
+                                .push(self.insertion_line(target))
+                                .push(row),
+                        ),
                     )
                 },
             );
+        let end = Target {
+            column: column.id,
+            before: None,
+        };
+        let cards = cards.push(
+            end.view(
+                self.drag_widgets.destinations[&end].clone(),
+                widget::column::with_capacity(2)
+                    .push(self.insertion_line(end))
+                    .push(cosmic::iced::widget::space().width(Length::Fill).height(32)),
+            ),
+        );
         let add: Element<_> = match &self.composer {
             Some((id, value)) if *id == column.id => text_input(fl!("card-title"), value)
                 .on_input(Message::Title)
@@ -503,6 +566,22 @@ impl Page {
         .height(Length::Fill)
         .class(cosmic::theme::Container::Card)
         .into()
+    }
+
+    fn insertion_line(&self, target: Target) -> Element<'_, Message> {
+        let active = self.drop_target == Some(target);
+        widget::container(cosmic::iced::widget::space())
+            .width(Length::Fill)
+            .height(3)
+            .style(
+                move |theme: &cosmic::Theme| cosmic::iced::widget::container::Style {
+                    background: active.then(|| {
+                        cosmic::iced::Background::Color(theme.cosmic().accent_color().into())
+                    }),
+                    ..Default::default()
+                },
+            )
+            .into()
     }
 
     pub fn drawer<'a>(&'a self, board: &'a Board) -> Option<ContextDrawer<'a, Message>> {
