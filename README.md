@@ -6,6 +6,9 @@
   <p>A Kanban app for the COSMIC™ desktop. Organize projects into columns, track details with checklists and due dates, and drag cards forward as work gets done.</p>
 </div>
 
+<img width="1154" height="758" alt="image" src="https://github.com/user-attachments/assets/65b03e4b-2b03-4366-a52c-86d186637351" />
+
+
 ## Installation
 
 A [justfile](./justfile) is included by default for the [casey/just][just] command runner.
