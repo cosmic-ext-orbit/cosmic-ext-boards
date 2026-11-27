@@ -79,19 +79,8 @@ impl Page {
             checklist(editor),
         ]);
 
-        let footer = widget::row::with_capacity(5)
+        let actions = widget::row::with_capacity(2)
             .spacing(spacing.space_xxs)
-            .push(
-                button::suggested(fl!("save"))
-                    .leading_icon(icon::from_name("document-save-symbolic"))
-                    .on_press_maybe(editor.valid().then_some(Message::SaveCard)),
-            )
-            .push(
-                button::standard(fl!("archive"))
-                    .leading_icon(icon::from_name("mail-archive-symbolic"))
-                    .on_press(Message::Archive(id, true)),
-            )
-            .push(widget::space::horizontal())
             .push(
                 action("go-up-symbolic", fl!("move-up"))
                     .on_press_maybe(can_move_up.then_some(Message::Shift(id, column.id, false))),
@@ -101,8 +90,18 @@ impl Page {
                     .on_press_maybe(can_move_down.then_some(Message::Shift(id, column.id, true))),
             );
 
+        let footer = widget::row::with_capacity(3)
+            .padding([spacing.space_xxxs, 0])
+            .push(button::standard(fl!("archive")).on_press(Message::Archive(id, true)))
+            .push(widget::space::horizontal())
+            .push(
+                button::suggested(fl!("save"))
+                    .on_press_maybe(editor.valid().then_some(Message::SaveCard)),
+            );
+
         Some(
             context_drawer::context_drawer(content, Message::Close)
+                .actions(actions)
                 .header(title)
                 .footer(footer),
         )
