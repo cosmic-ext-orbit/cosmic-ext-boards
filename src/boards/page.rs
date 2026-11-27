@@ -37,6 +37,7 @@ pub struct Page {
 struct Editor {
     card: Card,
     date: String,
+    editing_date: bool,
     calendar: Option<CalendarModel>,
     description: text_editor::Content<cosmic::Renderer>,
     item: String,
@@ -298,6 +299,7 @@ impl Page {
                     self.editor = Some(Editor {
                         card: card.clone(),
                         date: card.due.map_or_else(String::new, |date| date.to_string()),
+                        editing_date: false,
                         calendar: None,
                         description: text_editor::Content::with_text(&card.description),
                         item: String::new(),
@@ -461,26 +463,37 @@ impl Page {
 }
 
 impl Editor {
+    fn open_calendar(&mut self) {
+        if self.calendar.is_none() {
+            let date = self
+                .date
+                .trim()
+                .parse()
+                .unwrap_or_else(|_| ZonedDateTime::now().date());
+            self.calendar = Some(CalendarModel::new(date, date));
+        }
+    }
+
     fn update_calendar(&mut self, event: date_input::Event) {
         use date_input::Event;
 
         match event {
-            Event::Input(value) => self.date = value,
-            Event::Clear => {
-                self.date.clear();
-                self.calendar = None;
-            }
-            Event::Toggle => {
-                if self.calendar.take().is_none() {
-                    let date = self
-                        .date
-                        .trim()
-                        .parse()
-                        .unwrap_or_else(|_| ZonedDateTime::now().date());
-                    self.calendar = Some(CalendarModel::new(date, date));
+            Event::Input(value) => {
+                self.date = value;
+                if self.date.is_empty() {
+                    self.calendar = None;
                 }
             }
-            Event::Close => self.calendar = None,
+            Event::Edit(editing) => {
+                self.editing_date = editing;
+                if editing {
+                    self.open_calendar();
+                } else {
+                    self.calendar = None;
+                }
+            }
+            Event::Focus => self.open_calendar(),
+            Event::Unfocus | Event::Close => self.calendar = None,
             Event::PreviousMonth | Event::NextMonth => {
                 let step = if matches!(event, Event::NextMonth) {
                     1

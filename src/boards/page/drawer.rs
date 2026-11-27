@@ -5,7 +5,11 @@ use cosmic::widget::{self, TextEditor, button, checkbox, icon, settings, text, t
 
 use super::{Board, Editor, Message, Page};
 use crate::fl;
-use crate::widgets::{action, date_input::date_input, editor_style, symbolic_svg};
+use crate::widgets::{
+    action,
+    date_input::{Options, date_input},
+    editor_style, symbolic_svg,
+};
 
 impl Page {
     pub fn drawer<'a>(&'a self, board: &'a Board) -> Option<ContextDrawer<'a, Message>> {
@@ -110,17 +114,26 @@ impl Page {
 }
 
 fn due_date(editor: &Editor) -> widget::Row<'_, Message, cosmic::Theme> {
-    settings::item::builder(fl!("due-date"))
-        .icon(
-            icon::from_name("x-office-calendar-symbolic")
-                .size(16)
-                .icon(),
-        )
-        .control(field_control(date_input(
-            &editor.date,
-            editor.calendar.as_ref(),
-            Message::Calendar,
-        )))
+    let options = Options::default();
+    let item = settings::item::builder(fl!("due-date"));
+    let item = if let Some(message) = options.validation_message(&editor.date) {
+        item.description(message)
+    } else {
+        item
+    };
+
+    item.icon(
+        icon::from_name("x-office-calendar-symbolic")
+            .size(16)
+            .icon(),
+    )
+    .control(field_control(date_input(
+        &editor.date,
+        editor.editing_date,
+        editor.calendar.as_ref(),
+        options,
+        Message::Calendar,
+    )))
 }
 
 fn checklist(editor: &Editor) -> Element<'_, Message> {
