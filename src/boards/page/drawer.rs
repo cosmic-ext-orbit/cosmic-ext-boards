@@ -5,11 +5,8 @@ use cosmic::widget::{self, TextEditor, button, checkbox, icon, settings, text, t
 
 use super::{Board, Editor, Message, Page};
 use crate::fl;
-use crate::widgets::{
-    action,
-    date_input::{Options, date_input},
-    editor_style, symbolic_svg,
-};
+use crate::widgets::date_input;
+use crate::widgets::{action, date_input::date_input, editor_style, symbolic_svg};
 
 impl Page {
     pub fn drawer<'a>(&'a self, board: &'a Board) -> Option<ContextDrawer<'a, Message>> {
@@ -51,11 +48,9 @@ impl Page {
                         )))
                         .size(16),
                     )
-                    .control(field_control(widget::dropdown(
-                        destinations,
-                        selected,
-                        move |index| Message::MoveToColumn(id, ids[index]),
-                    ))),
+                    .control(widget::dropdown(destinations, selected, move |index| {
+                        Message::MoveToColumn(id, ids[index])
+                    })),
             )
             .add(due_date(editor));
         let description = settings::section()
@@ -114,7 +109,7 @@ impl Page {
 }
 
 fn due_date(editor: &Editor) -> widget::Row<'_, Message, cosmic::Theme> {
-    let options = Options::default();
+    let options = date_input::Options::auto();
     let item = settings::item::builder(fl!("due-date"));
     let item = if let Some(message) = options.validation_message(&editor.date) {
         item.description(message)
@@ -127,13 +122,13 @@ fn due_date(editor: &Editor) -> widget::Row<'_, Message, cosmic::Theme> {
             .size(16)
             .icon(),
     )
-    .control(field_control(date_input(
+    .control(date_input(
         &editor.date,
-        editor.editing_date,
-        editor.calendar.as_ref(),
+        editor.date_state.is_editing(),
+        editor.date_state.calendar(),
         options,
         Message::Calendar,
-    )))
+    ))
 }
 
 fn checklist(editor: &Editor) -> Element<'_, Message> {
@@ -187,8 +182,4 @@ fn archive(board: &Board) -> ContextDrawer<'_, Message> {
         Message::Close,
     )
     .title(fl!("archive"))
-}
-
-fn field_control<'a>(control: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    widget::container(control).width(172).into()
 }

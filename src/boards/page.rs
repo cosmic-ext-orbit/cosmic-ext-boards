@@ -4,8 +4,8 @@ mod view;
 use std::sync::LazyLock;
 
 use cosmic::iced::Task;
-use cosmic::widget::{Id as WidgetId, calendar::CalendarModel, text_editor, text_input};
-use jiff::{ToSpan, ZonedDateTime, civil::Date};
+use cosmic::widget::{Id as WidgetId, text_editor, text_input};
+use jiff::civil::Date;
 
 use super::{
     Board, Boards, Card, ChecklistItem, Column, Id,
@@ -17,6 +17,20 @@ use crate::widgets::date_input;
 
 static NAME_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
 static CARD_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
+
+fn date_options() -> date_input::Options<'static> {
+    date_input::Options::auto()
+}
+
+fn parse_date(value: &str) -> Option<Date> {
+    date_options().parse(value)
+}
+
+fn format_date(date: Date) -> String {
+    date_options()
+        .format(date)
+        .unwrap_or_else(|| date.to_string())
+}
 
 #[derive(Default)]
 pub struct Page {
@@ -37,8 +51,7 @@ pub struct Page {
 struct Editor {
     card: Card,
     date: String,
-    editing_date: bool,
-    calendar: Option<CalendarModel>,
+    date_state: date_input::DateInputState,
     description: text_editor::Content<cosmic::Renderer>,
     item: String,
     labels: Chips,
@@ -165,7 +178,7 @@ impl Page {
         if self
             .editor
             .as_mut()
-            .is_some_and(|editor| editor.calendar.take().is_some())
+            .is_some_and(|editor| editor.date_state.close_calendar())
         {
             return;
         }
@@ -298,9 +311,8 @@ impl Page {
                     self.archive = false;
                     self.editor = Some(Editor {
                         card: card.clone(),
-                        date: card.due.map_or_else(String::new, |date| date.to_string()),
-                        editing_date: false,
-                        calendar: None,
+                        date: card.due.map_or_else(String::new, format_date),
+                        date_state: date_input::DateInputState::default(),
                         description: text_editor::Content::with_text(&card.description),
                         item: String::new(),
                         labels: Chips::new(
@@ -450,7 +462,7 @@ impl Page {
                 };
                 editor.card.title = editor.card.title.trim().into();
                 editor.card.description = editor.description.text();
-                editor.card.due = editor.date.trim().parse().ok();
+                editor.card.due = parse_date(editor.date.trim());
                 editor.labels.commit_draft();
                 editor.card.labels = editor.labels.values().to_vec();
                 *card = editor.card.clone();
@@ -463,58 +475,13 @@ impl Page {
 }
 
 impl Editor {
-    fn open_calendar(&mut self) {
-        if self.calendar.is_none() {
-            let date = self
-                .date
-                .trim()
-                .parse()
-                .unwrap_or_else(|_| ZonedDateTime::now().date());
-            self.calendar = Some(CalendarModel::new(date, date));
-        }
-    }
-
     fn update_calendar(&mut self, event: date_input::Event) {
-        use date_input::Event;
-
-        match event {
-            Event::Input(value) => {
-                self.date = value;
-                if self.date.is_empty() {
-                    self.calendar = None;
-                }
-            }
-            Event::Edit(editing) => {
-                self.editing_date = editing;
-                if editing {
-                    self.open_calendar();
-                } else {
-                    self.calendar = None;
-                }
-            }
-            Event::Focus => self.open_calendar(),
-            Event::Unfocus | Event::Close => self.calendar = None,
-            Event::PreviousMonth | Event::NextMonth => {
-                let step = if matches!(event, Event::NextMonth) {
-                    1
-                } else {
-                    -1
-                };
-                if let Some(calendar) = &mut self.calendar
-                    && let Ok(date) = calendar.visible.checked_add(step.months())
-                {
-                    calendar.visible = date;
-                }
-            }
-            Event::Select(date) => {
-                self.date = date.to_string();
-                self.calendar = None;
-            }
-        }
+        let options = date_options();
+        self.date_state.update(event, &mut self.date, &options);
     }
 
     fn valid(&self) -> bool {
         !self.card.title.trim().is_empty()
-            && (self.date.trim().is_empty() || self.date.trim().parse::<Date>().is_ok())
+            && (self.date.trim().is_empty() || parse_date(self.date.trim()).is_some())
     }
 }
