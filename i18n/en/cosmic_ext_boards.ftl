@@ -37,7 +37,6 @@ storage-error = Could not access board data: { $error }
 retry = Retry
 discard = Discard change
 choose-date = Choose due date
-invalid-date = Enter a valid date in one of these formats: { $formats }
 any-label = Any label
 any-date = Any due date
 upcoming = Due in the next 7 days

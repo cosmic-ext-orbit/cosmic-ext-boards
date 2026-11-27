@@ -4,6 +4,7 @@ mod view;
 use std::sync::LazyLock;
 
 use cosmic::iced::Task;
+use cosmic::widget::date_input;
 use cosmic::widget::{Id as WidgetId, text_editor, text_input};
 use jiff::civil::Date;
 
@@ -13,7 +14,6 @@ use super::{
 };
 use crate::fl;
 use crate::widgets::chips::{self, Chips, Triggers};
-use crate::widgets::date_input;
 
 static NAME_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
 static CARD_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);

@@ -1,12 +1,13 @@
 use cosmic::Element;
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::iced::Length;
-use cosmic::widget::{self, TextEditor, button, checkbox, icon, settings, text, text_input};
+use cosmic::widget::{
+    self, TextEditor, button, checkbox, date_input, icon, settings, text, text_input,
+};
 
 use super::{Board, Editor, Message, Page};
 use crate::fl;
-use crate::widgets::date_input;
-use crate::widgets::{action, date_input::date_input, editor_style, symbolic_svg};
+use crate::widgets::{action, editor_style, symbolic_svg};
 
 impl Page {
     pub fn drawer<'a>(&'a self, board: &'a Board) -> Option<ContextDrawer<'a, Message>> {
@@ -122,10 +123,9 @@ fn due_date(editor: &Editor) -> widget::Row<'_, Message, cosmic::Theme> {
             .size(16)
             .icon(),
     )
-    .control(date_input(
+    .control(date_input::date_input(
         &editor.date,
-        editor.date_state.is_editing(),
-        editor.date_state.calendar(),
+        &editor.date_state,
         options,
         Message::Calendar,
     ))
