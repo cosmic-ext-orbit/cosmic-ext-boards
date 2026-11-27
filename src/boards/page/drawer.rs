@@ -1,9 +1,7 @@
 use cosmic::Element;
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::iced::Length;
-use cosmic::widget::{
-    self, TextEditor, button, checkbox, date_input, icon, settings, text, text_input,
-};
+use cosmic::widget::{self, TextEditor, button, checkbox, date_input, icon, settings, text};
 
 use super::{Board, Editor, Message, Page};
 use crate::fl;
@@ -40,7 +38,7 @@ impl Page {
         .on_input(Message::EditTitle)
         .on_submit(|_| Message::EditTitleActive(false));
 
-        let fields = settings::section()
+        let fields = widget::list_column::with_capacity(2)
             .add(
                 settings::item::builder(fl!("status"))
                     .icon(
@@ -53,6 +51,8 @@ impl Page {
                         Message::MoveToColumn(id, ids[index])
                     })),
             )
+            // The library date input already includes vertical padding.
+            .list_item_padding([0, spacing.space_m])
             .add(due_date(editor));
         let description = settings::section()
             .title(fl!("description"))
@@ -132,14 +132,31 @@ fn due_date(editor: &Editor) -> widget::Row<'_, Message, cosmic::Theme> {
 }
 
 fn checklist(editor: &Editor) -> Element<'_, Message> {
+    let spacing = cosmic::theme::spacing();
     let items = editor.card.checklist.iter().map(|item| {
         let id = item.id;
+        let draft = editor
+            .checklist_edit
+            .as_ref()
+            .filter(|(active, _)| *active == id)
+            .map(|(_, draft)| draft.as_str());
         settings::item_row(vec![
             checkbox(item.checked)
-                .label(&item.text)
-                .width(Length::Fill)
+                .name(item.text.as_str())
                 .on_toggle(move |checked| Message::ToggleItem(id, checked))
                 .into(),
+            widget::editable_input(
+                fl!("checklist-item"),
+                draft.unwrap_or(&item.text),
+                draft.is_some(),
+                move |active| Message::EditChecklistItem(id, active),
+            )
+            .padding(0)
+            .width(Length::Fill)
+            .on_input(move |text| Message::ChecklistItemText(id, text))
+            .on_unfocus(Message::EditChecklistItem(id, false))
+            .on_submit(move |_| Message::SubmitChecklistItem(id))
+            .into(),
             action("edit-delete-symbolic", fl!("remove"))
                 .on_press(Message::RemoveItem(id))
                 .into(),
@@ -149,10 +166,16 @@ fn checklist(editor: &Editor) -> Element<'_, Message> {
         .title(fl!("checklist"))
         .extend(items)
         .add(settings::item_row(vec![
-            text_input(fl!("checklist-item"), &editor.item)
-                .on_input(Message::Item)
-                .on_submit(|_| Message::AddItem)
-                .into(),
+            widget::editable_input(
+                fl!("checklist-item"),
+                &editor.item,
+                editor.editing_item,
+                Message::EditItemActive,
+            )
+            .padding([0, spacing.space_xxs])
+            .on_input(Message::Item)
+            .on_submit(|_| Message::AddItem)
+            .into(),
             action("list-add-symbolic", fl!("add"))
                 .on_press_maybe((!editor.item.trim().is_empty()).then_some(Message::AddItem))
                 .into(),

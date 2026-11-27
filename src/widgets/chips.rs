@@ -2,12 +2,13 @@ use std::borrow::Cow;
 
 use cosmic::Element;
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{self, text, text_input};
+use cosmic::widget::{self, text};
 
 use super::action;
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    Edit(bool),
     Input(String),
     Submit(String),
     Remove(usize),
@@ -22,6 +23,7 @@ pub struct Triggers {
 pub struct Chips {
     values: Vec<String>,
     draft: String,
+    editing: bool,
     triggers: Triggers,
 }
 
@@ -30,12 +32,14 @@ impl Chips {
         Self {
             values,
             draft: String::new(),
+            editing: false,
             triggers,
         }
     }
 
     pub fn update(&mut self, event: Event) {
         match event {
+            Event::Edit(editing) => self.editing = editing,
             Event::Input(value) => {
                 if let Some((committed, draft)) = value.rsplit_once(self.triggers.separators) {
                     for label in committed.split(self.triggers.separators) {
@@ -81,33 +85,41 @@ impl Chips {
         on_event: fn(Event) -> Message,
     ) -> Element<'a, Message> {
         let spacing = cosmic::theme::spacing();
-        let input = text_input(placeholder, &self.draft)
-            .width(if self.values.is_empty() {
-                Length::Fill
-            } else {
-                Length::Fixed(136.0)
+        let input =
+            widget::editable_input(placeholder, &self.draft, self.editing, move |editing| {
+                on_event(Event::Edit(editing))
             })
-            .trailing_icon(
-                action("list-add-symbolic", add_label)
-                    .extra_small()
-                    .on_press_maybe(
-                        (!self.draft.trim().is_empty())
-                            .then(|| on_event(Event::Submit(self.draft.clone()))),
-                    )
-                    .into(),
-            )
+            .padding([0, spacing.space_xxs])
+            .width(Length::Fill)
             .on_input(move |value| on_event(Event::Input(value)));
         let input = if self.triggers.enter {
             input.on_submit(move |value| on_event(Event::Submit(value)))
         } else {
             input
         };
+        let entry = widget::row::with_capacity(2)
+            .width(if self.values.is_empty() {
+                Length::Fill
+            } else {
+                Length::Fixed(168.0)
+            })
+            .spacing(spacing.space_xxs)
+            .align_y(Alignment::Center)
+            .push(input)
+            .push(
+                action("list-add-symbolic", add_label)
+                    .extra_small()
+                    .on_press_maybe(
+                        (!self.draft.trim().is_empty())
+                            .then(|| on_event(Event::Submit(self.draft.clone()))),
+                    ),
+            );
         let row = self.values.iter().enumerate().fold(
             widget::row::with_capacity(self.values.len() + 1)
                 .width(Length::Fill)
                 .spacing(spacing.space_xxs)
                 .align_y(Alignment::Center)
-                .push(input),
+                .push(entry),
             |row, (index, label)| {
                 row.push(surface(
                     widget::row::with_capacity(2)

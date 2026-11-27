@@ -4,6 +4,8 @@ mod view;
 use std::sync::LazyLock;
 
 use cosmic::iced::Task;
+use cosmic::iced::core::widget::operation::focusable;
+use cosmic::iced::runtime::{Action, task};
 use cosmic::widget::date_input;
 use cosmic::widget::{Id as WidgetId, text_editor, text_input};
 use jiff::civil::Date;
@@ -54,6 +56,8 @@ struct Editor {
     date_state: date_input::DateInputState,
     description: text_editor::Content<cosmic::Renderer>,
     item: String,
+    editing_item: bool,
+    checklist_edit: Option<(Id, String)>,
     labels: Chips,
     editing_title: bool,
 }
@@ -121,7 +125,11 @@ pub enum Message {
     Calendar(date_input::Event),
     Labels(chips::Event),
     Item(String),
+    EditItemActive(bool),
     AddItem,
+    EditChecklistItem(Id, bool),
+    ChecklistItemText(Id, String),
+    SubmitChecklistItem(Id),
     ToggleItem(Id, bool),
     RemoveItem(Id),
     SaveCard,
@@ -161,6 +169,12 @@ impl Page {
                     .is_some_and(|(column, _)| column == id) =>
             {
                 text_input::focus(CARD_INPUT.clone())
+            }
+            Message::Calendar(date_input::Event::Input(value)) if value.is_empty() => {
+                task::effect(Action::widget(focusable::unfocus()))
+            }
+            Message::SubmitChecklistItem(_) | Message::Calendar(date_input::Event::Select(_)) => {
+                task::effect(Action::widget(focusable::unfocus()))
             }
             _ => Task::none(),
         }
@@ -315,6 +329,8 @@ impl Page {
                         date_state: date_input::DateInputState::default(),
                         description: text_editor::Content::with_text(&card.description),
                         item: String::new(),
+                        editing_item: false,
+                        checklist_edit: None,
                         labels: Chips::new(
                             card.labels.clone(),
                             Triggers {
@@ -439,6 +455,7 @@ impl Page {
             Message::Calendar(event) => editor.update_calendar(event),
             Message::Labels(event) => editor.labels.update(event),
             Message::Item(value) => editor.item = value,
+            Message::EditItemActive(active) => editor.editing_item = active,
             Message::AddItem if !editor.item.trim().is_empty() => {
                 editor.card.checklist.push(ChecklistItem {
                     id: Id::new_v4(),
@@ -447,12 +464,38 @@ impl Page {
                 });
                 editor.item.clear();
             }
+            Message::EditChecklistItem(id, true) if !editor.is_editing_checklist_item(id) => {
+                editor.finish_checklist_edit();
+                editor.checklist_edit = editor
+                    .card
+                    .checklist
+                    .iter()
+                    .find(|item| item.id == id)
+                    .map(|item| (id, item.text.clone()));
+            }
+            Message::EditChecklistItem(id, false) | Message::SubmitChecklistItem(id)
+                if editor.is_editing_checklist_item(id) =>
+            {
+                editor.finish_checklist_edit();
+            }
+            Message::ChecklistItemText(id, text) => {
+                if let Some((active, draft)) = &mut editor.checklist_edit
+                    && *active == id
+                {
+                    *draft = text;
+                }
+            }
             Message::ToggleItem(id, checked) => {
                 if let Some(item) = editor.card.checklist.iter_mut().find(|item| item.id == id) {
                     item.checked = checked;
                 }
             }
-            Message::RemoveItem(id) => editor.card.checklist.retain(|item| item.id != id),
+            Message::RemoveItem(id) => {
+                if editor.is_editing_checklist_item(id) {
+                    editor.checklist_edit = None;
+                }
+                editor.card.checklist.retain(|item| item.id != id);
+            }
             Message::SaveCard if editor.valid() => {
                 let Some(card) = boards
                     .active_mut()
@@ -463,6 +506,7 @@ impl Page {
                 editor.card.title = editor.card.title.trim().into();
                 editor.card.description = editor.description.text();
                 editor.card.due = parse_date(editor.date.trim());
+                editor.finish_checklist_edit();
                 editor.labels.commit_draft();
                 editor.card.labels = editor.labels.values().to_vec();
                 *card = editor.card.clone();
@@ -475,6 +519,21 @@ impl Page {
 }
 
 impl Editor {
+    fn is_editing_checklist_item(&self, id: Id) -> bool {
+        self.checklist_edit
+            .as_ref()
+            .is_some_and(|(active, _)| *active == id)
+    }
+
+    fn finish_checklist_edit(&mut self) {
+        if let Some((id, draft)) = self.checklist_edit.take()
+            && !draft.trim().is_empty()
+            && let Some(item) = self.card.checklist.iter_mut().find(|item| item.id == id)
+        {
+            item.text = draft.trim().to_owned();
+        }
+    }
+
     fn update_calendar(&mut self, event: date_input::Event) {
         let options = date_options();
         self.date_state.update(event, &mut self.date, &options);

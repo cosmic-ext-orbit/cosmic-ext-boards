@@ -14,7 +14,7 @@ pub fn action<'a, Message: Clone + 'static>(
 pub fn editor_style(theme: &cosmic::Theme, status: text_editor::Status) -> text_editor::Style {
     use text_input::StyleSheet;
 
-    let class = cosmic::theme::TextInput::Default;
+    let class = cosmic::theme::TextInput::EditableText;
     let appearance = match status {
         text_editor::Status::Active => theme.active(&class),
         text_editor::Status::Hovered => theme.hovered(&class),
@@ -29,7 +29,9 @@ pub fn editor_style(theme: &cosmic::Theme, status: text_editor::Status) -> text_
             color: appearance.border_color,
         },
         placeholder: appearance.placeholder_color,
-        value: appearance.text_color.unwrap_or(appearance.label_color),
+        value: appearance
+            .text_color
+            .unwrap_or_else(|| theme.current_container().on.into()),
         selection: appearance.selected_fill,
     }
 }
