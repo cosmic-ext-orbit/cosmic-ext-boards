@@ -1,10 +1,10 @@
 mod drawer;
 mod view;
 
-use std::sync::LazyLock;
+use std::{collections::HashMap, sync::LazyLock};
 
-use cosmic::iced::Task;
-use cosmic::iced::core::widget::operation::focusable;
+use cosmic::iced::{Rectangle, Task};
+use cosmic::iced::core::widget::{Operation, operation::focusable};
 use cosmic::iced::runtime::{Action, task};
 use cosmic::widget::date_input;
 use cosmic::widget::{Id as WidgetId, text_editor, text_input};
@@ -46,6 +46,8 @@ pub struct Page {
     archive: bool,
     drop_target: Option<Target>,
     drag_widgets: drag::Widgets,
+    card_bounds: HashMap<Id, Rectangle>,
+    pending_drop: Option<(Id, Id, f64)>,
     pub error: Option<String>,
     pub pending: Option<Boards>,
 }
@@ -134,10 +136,12 @@ pub enum Message {
     RemoveItem(Id),
     SaveCard,
     MoveToColumn(Id, Id),
-    DragEntered(Target),
-    DragLeft(Target),
+    DragStarted,
+    CardBounds(HashMap<Id, Rectangle>),
+    DragAt { column: Id, y: f64 },
+    DragLeft(Id),
     DragEnded,
-    Drop(Id, Target),
+    DropAt(Id, Id, f64),
     Shift(Id, Id, bool),
     ShiftColumn(Id, bool),
     CompleteColumn(Id, bool),
@@ -155,6 +159,32 @@ pub enum Message {
 impl Page {
     pub fn update_drag_widgets(&mut self, board: Option<&Board>) {
         self.drag_widgets.update(board);
+    }
+
+    pub fn has_card_bounds(&self) -> bool {
+        !self.card_bounds.is_empty()
+    }
+
+    pub fn card_bounds_operation(&self) -> impl Operation<HashMap<Id, Rectangle>> + 'static {
+        drag::card_bounds(self.drag_widgets.sources.clone())
+    }
+
+    fn target_at(&self, boards: &Boards, column: Id, y: f64) -> Option<Target> {
+        let board = boards.active()?;
+        let column = board.columns.iter().find(|entry| entry.id == column)?;
+        let before = column
+            .cards
+            .iter()
+            .filter(|card| !card.archived && self.card_bounds.contains_key(&card.id))
+            .find(|card| {
+                let bounds = self.card_bounds[&card.id];
+                y < f64::from(bounds.y + bounds.height / 2.0)
+            })
+            .map(|card| card.id);
+        Some(Target {
+            column: column.id,
+            before,
+        })
     }
 
     pub fn focus(&self, message: &Message) -> Task<Message> {
@@ -350,18 +380,38 @@ impl Page {
             Message::ToggleFilters => self.show_filters = !self.show_filters,
             Message::FilterLabel(value) => self.label = value,
             Message::FilterDue(value) => self.due = value,
-            Message::DragEntered(target) => self.drop_target = Some(target),
-            Message::DragLeft(target) => {
-                if self.drop_target == Some(target) {
+            Message::DragStarted => {}
+            Message::CardBounds(bounds) => {
+                self.card_bounds = bounds;
+                if let Some((card, column, y)) = self.pending_drop.take()
+                    && let Some(target) = self.target_at(boards, column, y)
+                {
+                    self.drop_target = None;
+                    return boards.active_mut().is_some_and(|board| {
+                        board.move_card(card, target.column, target.before)
+                    });
+                }
+            }
+            Message::DragAt { column, y } => {
+                self.drop_target = self.target_at(boards, column, y);
+            }
+            Message::DragLeft(column) => {
+                if self.drop_target.is_some_and(|target| target.column == column) {
                     self.drop_target = None;
                 }
             }
             Message::DragEnded => self.drop_target = None,
-            Message::Drop(id, target) => {
+            Message::DropAt(card, column, y) => {
                 self.drop_target = None;
-                return boards
-                    .active_mut()
-                    .is_some_and(|board| board.move_card(id, target.column, target.before));
+                if !self.has_card_bounds() {
+                    self.pending_drop = Some((card, column, y));
+                    return false;
+                }
+                return self.target_at(boards, column, y).is_some_and(|target| {
+                    boards
+                        .active_mut()
+                        .is_some_and(|board| board.move_card(card, target.column, target.before))
+                });
             }
             Message::MoveToColumn(id, column) => {
                 let Some(board) = boards.active_mut() else {

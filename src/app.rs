@@ -241,6 +241,21 @@ impl cosmic::Application for AppModel {
                 .page
                 .focus(&message)
                 .map(|message| cosmic::Action::App(Message::Board(message)));
+            if matches!(message, BoardMessage::DragStarted)
+                || (!self.page.has_card_bounds()
+                    && matches!(
+                        message,
+                        BoardMessage::DragAt { .. } | BoardMessage::DropAt(..)
+                    ))
+            {
+                task = task.chain(
+                    cosmic::iced::runtime::task::widget(self.page.card_bounds_operation()).map(
+                        |bounds| {
+                            cosmic::Action::App(Message::Board(BoardMessage::CardBounds(bounds)))
+                        },
+                    ),
+                );
+            }
         }
         self.sync_drawer();
         task

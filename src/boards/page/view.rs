@@ -261,12 +261,9 @@ impl Page {
                     before: Some(card.id),
                 };
                 list.push(
-                    target.view(
-                        self.drag_widgets.destinations[&target].clone(),
-                        widget::column::with_capacity(2)
-                            .push(self.insertion_line(target))
-                            .push(surface),
-                    ),
+                    widget::column::with_capacity(2)
+                        .push(self.insertion_line(target))
+                        .push(surface),
                 )
             },
         );
@@ -275,12 +272,9 @@ impl Page {
             before: None,
         };
         let cards = cards.push(
-            end.view(
-                self.drag_widgets.destinations[&end].clone(),
-                widget::column::with_capacity(2)
-                    .push(self.insertion_line(end))
-                    .push(cosmic::iced::widget::space().width(Length::Fill).height(12)),
-            ),
+            widget::column::with_capacity(2)
+                .push(self.insertion_line(end))
+                .push(cosmic::iced::widget::space().width(Length::Fill).height(12)),
         );
         let add: Element<_> = match &self.composer {
             Some((id, value)) if *id == column.id => widget::row::with_capacity(2)
@@ -358,16 +352,19 @@ impl Page {
         )
         .padding(spacing.space_xs)
         .height(Length::Fill);
-        widget::container(
-            widget::column::with_capacity(3)
-                .push(header)
-                .push(widget::divider::horizontal::light())
-                .push(body),
+        drag::column(
+            self.drag_widgets.destinations[&column.id].clone(),
+            column.id,
+            widget::container(
+                widget::column::with_capacity(3)
+                    .push(header)
+                    .push(widget::divider::horizontal::light())
+                    .push(body),
+            )
+            .width(248)
+            .height(Length::Fill)
+            .class(cosmic::theme::Container::Card),
         )
-        .width(248)
-        .height(Length::Fill)
-        .class(cosmic::theme::Container::Card)
-        .into()
     }
 
     fn insertion_line(&self, target: Target) -> Element<'_, Message> {
