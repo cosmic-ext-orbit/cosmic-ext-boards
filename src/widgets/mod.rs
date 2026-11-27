@@ -1,3 +1,5 @@
+pub mod date_input;
+
 pub mod chips;
 
 use cosmic::widget::{self, button, icon, text_editor, text_input};

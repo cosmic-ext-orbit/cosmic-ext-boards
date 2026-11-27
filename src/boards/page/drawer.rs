@@ -1,14 +1,11 @@
 use cosmic::Element;
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::iced::Length;
-use cosmic::widget::{
-    self, TextEditor, button, checkbox, icon, popover, settings, text, text_input,
-};
-use jiff::civil::Weekday;
+use cosmic::widget::{self, TextEditor, button, checkbox, icon, settings, text, text_input};
 
 use super::{Board, Editor, Message, Page};
 use crate::fl;
-use crate::widgets::{action, editor_style, symbolic_svg};
+use crate::widgets::{action, date_input::date_input, editor_style, symbolic_svg};
 
 impl Page {
     pub fn drawer<'a>(&'a self, board: &'a Board) -> Option<ContextDrawer<'a, Message>> {
@@ -113,39 +110,17 @@ impl Page {
 }
 
 fn due_date(editor: &Editor) -> widget::Row<'_, Message, cosmic::Theme> {
-    let button =
-        action("x-office-calendar-symbolic", fl!("choose-date")).on_press(Message::ToggleCalendar);
-    let mut date = popover(button)
-        .position(popover::Position::Bottom)
-        .on_close(Message::CloseCalendar);
-    if let Some(model) = &editor.calendar {
-        date = date.popup(
-            widget::container(widget::calendar(
-                model,
-                Message::SelectDate,
-                || Message::CalendarMonth(false),
-                || Message::CalendarMonth(true),
-                Weekday::Monday,
-            ))
-            .padding(cosmic::theme::spacing().space_xs)
-            .class(cosmic::theme::Container::Card),
-        );
-    }
     settings::item::builder(fl!("due-date"))
         .icon(
             icon::from_name("x-office-calendar-symbolic")
                 .size(16)
                 .icon(),
         )
-        .control(field_control(settings::item_row(vec![
-            text_input("YYYY-MM-DD", &editor.date)
-                .on_input(Message::Date)
-                .into(),
-            date.into(),
-            action("edit-clear-symbolic", fl!("clear-date"))
-                .on_press_maybe((!editor.date.is_empty()).then(|| Message::Date(String::new())))
-                .into(),
-        ])))
+        .control(field_control(date_input(
+            &editor.date,
+            editor.calendar.as_ref(),
+            Message::Calendar,
+        )))
 }
 
 fn checklist(editor: &Editor) -> Element<'_, Message> {

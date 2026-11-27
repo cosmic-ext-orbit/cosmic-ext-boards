@@ -13,6 +13,7 @@ use super::{
 };
 use crate::fl;
 use crate::widgets::chips::{self, Chips, Triggers};
+use crate::widgets::date_input;
 
 static NAME_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
 static CARD_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
@@ -103,11 +104,7 @@ pub enum Message {
     EditTitle(String),
     EditTitleActive(bool),
     Description(text_editor::Action),
-    ToggleCalendar,
-    CloseCalendar,
-    CalendarMonth(bool),
-    SelectDate(Date),
-    Date(String),
+    Calendar(date_input::Event),
     Labels(chips::Event),
     Item(String),
     AddItem,
@@ -425,31 +422,7 @@ impl Page {
             Message::EditTitle(value) => editor.card.title = value,
             Message::EditTitleActive(active) => editor.editing_title = active,
             Message::Description(action) => editor.description.perform(action),
-            Message::ToggleCalendar => {
-                editor.calendar = if editor.calendar.is_some() {
-                    None
-                } else {
-                    let date = editor
-                        .date
-                        .parse()
-                        .unwrap_or_else(|_| ZonedDateTime::now().date());
-                    Some(CalendarModel::new(date, date))
-                };
-            }
-            Message::CloseCalendar => editor.calendar = None,
-            Message::CalendarMonth(next) => {
-                if let Some(calendar) = &mut editor.calendar {
-                    let step = if next { 1 } else { -1 };
-                    if let Ok(date) = calendar.visible.checked_add(step.months()) {
-                        calendar.visible = date;
-                    }
-                }
-            }
-            Message::SelectDate(date) => {
-                editor.date = date.to_string();
-                editor.calendar = None;
-            }
-            Message::Date(value) => editor.date = value,
+            Message::Calendar(event) => editor.update_calendar(event),
             Message::Labels(event) => editor.labels.update(event),
             Message::Item(value) => editor.item = value,
             Message::AddItem if !editor.item.trim().is_empty() => {
@@ -488,6 +461,45 @@ impl Page {
 }
 
 impl Editor {
+    fn update_calendar(&mut self, event: date_input::Event) {
+        use date_input::Event;
+
+        match event {
+            Event::Input(value) => self.date = value,
+            Event::Clear => {
+                self.date.clear();
+                self.calendar = None;
+            }
+            Event::Toggle => {
+                if self.calendar.take().is_none() {
+                    let date = self
+                        .date
+                        .trim()
+                        .parse()
+                        .unwrap_or_else(|_| ZonedDateTime::now().date());
+                    self.calendar = Some(CalendarModel::new(date, date));
+                }
+            }
+            Event::Close => self.calendar = None,
+            Event::PreviousMonth | Event::NextMonth => {
+                let step = if matches!(event, Event::NextMonth) {
+                    1
+                } else {
+                    -1
+                };
+                if let Some(calendar) = &mut self.calendar
+                    && let Ok(date) = calendar.visible.checked_add(step.months())
+                {
+                    calendar.visible = date;
+                }
+            }
+            Event::Select(date) => {
+                self.date = date.to_string();
+                self.calendar = None;
+            }
+        }
+    }
+
     fn valid(&self) -> bool {
         !self.card.title.trim().is_empty()
             && (self.date.trim().is_empty() || self.date.trim().parse::<Date>().is_ok())

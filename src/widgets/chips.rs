@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use cosmic::Element;
-use cosmic::iced::Alignment;
+use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, text, text_input};
 
 use super::action;
@@ -82,14 +82,32 @@ impl Chips {
     ) -> Element<'a, Message> {
         let spacing = cosmic::theme::spacing();
         let input = text_input(placeholder, &self.draft)
+            .width(if self.values.is_empty() {
+                Length::Fill
+            } else {
+                Length::Fixed(136.0)
+            })
+            .trailing_icon(
+                action("list-add-symbolic", add_label)
+                    .extra_small()
+                    .on_press_maybe(
+                        (!self.draft.trim().is_empty())
+                            .then(|| on_event(Event::Submit(self.draft.clone()))),
+                    )
+                    .into(),
+            )
             .on_input(move |value| on_event(Event::Input(value)));
         let input = if self.triggers.enter {
             input.on_submit(move |value| on_event(Event::Submit(value)))
         } else {
             input
         };
-        let tags = self.values.iter().enumerate().fold(
-            widget::row::with_capacity(self.values.len()).spacing(spacing.space_xxxs),
+        let row = self.values.iter().enumerate().fold(
+            widget::row::with_capacity(self.values.len() + 1)
+                .width(Length::Fill)
+                .spacing(spacing.space_xxs)
+                .align_y(Alignment::Center)
+                .push(input),
             |row, (index, label)| {
                 row.push(surface(
                     widget::row::with_capacity(2)
@@ -104,19 +122,7 @@ impl Chips {
                 ))
             },
         );
-        widget::column::with_capacity(2)
-            .spacing(spacing.space_xxs)
-            .push_maybe((!self.values.is_empty()).then(|| tags.wrap()))
-            .push(widget::settings::item_row(vec![
-                input.into(),
-                action("list-add-symbolic", add_label)
-                    .on_press_maybe(
-                        (!self.draft.trim().is_empty())
-                            .then(|| on_event(Event::Submit(self.draft.clone()))),
-                    )
-                    .into(),
-            ]))
-            .into()
+        row.wrap().into()
     }
 }
 
