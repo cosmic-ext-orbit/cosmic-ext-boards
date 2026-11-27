@@ -3,9 +3,9 @@ mod view;
 
 use std::{collections::HashMap, sync::LazyLock};
 
-use cosmic::iced::{Rectangle, Task};
 use cosmic::iced::core::widget::{Operation, operation::focusable};
 use cosmic::iced::runtime::{Action, task};
+use cosmic::iced::{Rectangle, Task};
 use cosmic::widget::date_input;
 use cosmic::widget::{Id as WidgetId, text_editor, text_input};
 use jiff::civil::Date;
@@ -47,6 +47,8 @@ pub struct Page {
     drop_target: Option<Target>,
     drag_widgets: drag::Widgets,
     card_bounds: HashMap<Id, Rectangle>,
+    dragging: Option<Id>,
+    pending_drag: Option<Id>,
     pending_drop: Option<(Id, Id, f64)>,
     pub error: Option<String>,
     pub pending: Option<Boards>,
@@ -136,7 +138,7 @@ pub enum Message {
     RemoveItem(Id),
     SaveCard,
     MoveToColumn(Id, Id),
-    DragStarted,
+    DragStarted(Id),
     CardBounds(HashMap<Id, Rectangle>),
     DragAt { column: Id, y: f64 },
     DragLeft(Id),
@@ -380,29 +382,41 @@ impl Page {
             Message::ToggleFilters => self.show_filters = !self.show_filters,
             Message::FilterLabel(value) => self.label = value,
             Message::FilterDue(value) => self.due = value,
-            Message::DragStarted => {}
+            Message::DragStarted(card) => self.pending_drag = Some(card),
             Message::CardBounds(bounds) => {
                 self.card_bounds = bounds;
+                if let Some(card) = self.pending_drag.take() {
+                    self.dragging = Some(card);
+                }
                 if let Some((card, column, y)) = self.pending_drop.take()
                     && let Some(target) = self.target_at(boards, column, y)
                 {
                     self.drop_target = None;
-                    return boards.active_mut().is_some_and(|board| {
-                        board.move_card(card, target.column, target.before)
-                    });
+                    return boards
+                        .active_mut()
+                        .is_some_and(|board| board.move_card(card, target.column, target.before));
                 }
             }
             Message::DragAt { column, y } => {
                 self.drop_target = self.target_at(boards, column, y);
             }
             Message::DragLeft(column) => {
-                if self.drop_target.is_some_and(|target| target.column == column) {
+                if self
+                    .drop_target
+                    .is_some_and(|target| target.column == column)
+                {
                     self.drop_target = None;
                 }
             }
-            Message::DragEnded => self.drop_target = None,
+            Message::DragEnded => {
+                self.drop_target = None;
+                self.dragging = None;
+                self.pending_drag = None;
+            }
             Message::DropAt(card, column, y) => {
                 self.drop_target = None;
+                self.dragging = None;
+                self.pending_drag = None;
                 if !self.has_card_bounds() {
                     self.pending_drop = Some((card, column, y));
                     return false;

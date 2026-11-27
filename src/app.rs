@@ -241,7 +241,7 @@ impl cosmic::Application for AppModel {
                 .page
                 .focus(&message)
                 .map(|message| cosmic::Action::App(Message::Board(message)));
-            if matches!(message, BoardMessage::DragStarted)
+            if matches!(message, BoardMessage::DragStarted(..))
                 || (!self.page.has_card_bounds()
                     && matches!(
                         message,

@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
 use cosmic::Element;
-use cosmic::iced::{Alignment, Length, widget::scrollable};
+use cosmic::iced::core::widget::tree;
+use cosmic::iced::{Alignment, Color, Length, Shadow, Vector, widget::scrollable};
 use cosmic::widget::{self, button, icon, menu, text, text_input};
 use jiff::{ZonedDateTime, civil::Date};
 
 use super::{
-    Board, CARD_INPUT, Column, DueFilter, Message, NAME_INPUT, NameTarget, Page, Target, drag,
+    Board, CARD_INPUT, Card, Column, DueFilter, Message, NAME_INPUT, NameTarget, Page, Target, drag,
 };
 use crate::config::{Density, Preferences};
 use crate::fl;
@@ -111,6 +112,7 @@ impl Page {
                     )))
                     .class(card_style(
                         self.show_filters || self.label.is_some() || self.due != DueFilter::All,
+                        false,
                     ))
                     .on_press(Message::ToggleFilters),
             );
@@ -194,7 +196,6 @@ impl Page {
             })
             .collect::<Vec<_>>();
         let count = cards.len();
-        let show_info = preferences.density != Density::TitleOnly;
         let padding = match preferences.density {
             Density::Comfortable => [8, 10],
             Density::Compact | Density::TitleOnly => [4, 8],
@@ -206,55 +207,26 @@ impl Page {
                     .editor
                     .as_ref()
                     .is_some_and(|editor| editor.card.id == card.id);
-                let title = text::heading(&card.title);
-                let mut content = widget::column::with_capacity(3)
-                    .spacing(spacing.space_xxxs)
-                    .width(Length::Fill)
-                    .push(title);
-                if show_info && preferences.show_labels && !card.labels.is_empty() {
-                    let labels = card.labels.iter().fold(
-                        widget::row::with_capacity(card.labels.len()).spacing(spacing.space_xxxs),
-                        |row, label| row.push(chip(label)),
-                    );
-                    content = content.push(labels.wrap());
-                }
-                let mut metadata = widget::row::with_capacity(2).spacing(spacing.space_xs);
-                let show_checklist =
-                    show_info && preferences.show_checklist_progress && !card.checklist.is_empty();
-                let due = card.due.filter(|_| show_info && preferences.show_due_dates);
-                if show_checklist {
-                    let done = card.checklist.iter().filter(|item| item.checked).count();
-                    metadata = metadata.push(detail(
-                        "object-select-symbolic",
-                        format!("{done}/{}", card.checklist.len()),
-                    ));
-                }
-                if let Some(due) = due {
-                    let date = if due.year() == today.year() {
-                        due.strftime("%b %-d").to_string()
-                    } else {
-                        due.to_string()
-                    };
-                    metadata = metadata.push(detail(
-                        "x-office-calendar-symbolic",
-                        if due < today && !column.complete {
-                            fl!("overdue", date = date)
-                        } else {
-                            date
-                        },
-                    ));
-                }
-                if show_checklist || due.is_some() {
-                    content = content.push(metadata.wrap());
-                }
+                let content: Element<'a, Message> = if self.dragging == Some(card.id)
+                    && let Some(bounds) = self.card_bounds.get(&card.id)
+                {
+                    widget::container(cosmic::iced::widget::space())
+                        .width(Length::Fill)
+                        .height(Length::Fixed(bounds.height))
+                        .into()
+                } else {
+                    button::custom(card_content(card, column.complete, today, preferences))
+                        .class(card_style(selected, false))
+                        .padding(padding)
+                        .width(Length::Fill)
+                        .on_press(Message::Open(card.id))
+                        .into()
+                };
                 let surface = drag::source(
                     card.id,
                     self.drag_widgets.sources[&card.id].clone(),
-                    button::custom(content)
-                        .class(card_style(selected))
-                        .padding(padding)
-                        .width(Length::Fill)
-                        .on_press(Message::Open(card.id)),
+                    content,
+                    drag_icon(card, column.complete, today, preferences, selected, padding),
                 );
                 let target = Target {
                     column: column.id,
@@ -291,7 +263,7 @@ impl Page {
                 widget::container(detail("list-add-symbolic", fl!("add-card")))
                     .center_x(Length::Fill),
             )
-            .class(card_style(false))
+            .class(card_style(false, false))
             .width(Length::Fill)
             .padding([7, 8])
             .on_press(Message::Compose(column.id))
@@ -403,6 +375,122 @@ impl menu::action::MenuAction for ColumnAction {
     }
 }
 
+fn card_content(
+    card: &Card,
+    complete: bool,
+    today: Date,
+    preferences: &Preferences,
+) -> Element<'static, Message> {
+    let spacing = cosmic::theme::spacing();
+    let show_info = preferences.density != Density::TitleOnly;
+    let mut content = widget::column::with_capacity(3)
+        .spacing(spacing.space_xxxs)
+        .width(Length::Fill)
+        .push(text::heading(card.title.clone()));
+    if show_info && preferences.show_labels && !card.labels.is_empty() {
+        let labels = card.labels.iter().cloned().fold(
+            widget::row::with_capacity(card.labels.len()).spacing(spacing.space_xxxs),
+            |row, label| row.push(chip(label)),
+        );
+        content = content.push(labels.wrap());
+    }
+    let mut metadata = widget::row::with_capacity(2).spacing(spacing.space_xs);
+    let checklist = show_info && preferences.show_checklist_progress && !card.checklist.is_empty();
+    let due = card.due.filter(|_| show_info && preferences.show_due_dates);
+    if checklist {
+        let done = card.checklist.iter().filter(|item| item.checked).count();
+        metadata = metadata.push(detail(
+            "object-select-symbolic",
+            format!("{done}/{}", card.checklist.len()),
+        ));
+    }
+    if let Some(due) = due {
+        let date = if due.year() == today.year() {
+            due.strftime("%b %-d").to_string()
+        } else {
+            due.to_string()
+        };
+        metadata = metadata.push(detail(
+            "x-office-calendar-symbolic",
+            if due < today && !complete {
+                fl!("overdue", date = date)
+            } else {
+                date
+            },
+        ));
+    }
+    if checklist || due.is_some() {
+        content = content.push(metadata.wrap());
+    }
+    content.into()
+}
+
+fn drag_icon(
+    card: &Card,
+    complete: bool,
+    today: Date,
+    preferences: &Preferences,
+    selected: bool,
+    padding: [u16; 2],
+) -> impl Fn(Vector) -> (Element<'static, ()>, tree::State, Vector) + use<> {
+    let card = card.clone();
+    let preferences = Preferences {
+        density: preferences.density,
+        show_labels: preferences.show_labels,
+        show_due_dates: preferences.show_due_dates,
+        show_checklist_progress: preferences.show_checklist_progress,
+        ..Preferences::default()
+    };
+    move |offset| {
+        let content: Element<'static, ()> =
+            card_content(&card, complete, today, &preferences).map(|_| ());
+        let icon: Element<'static, ()> = widget::container(
+            widget::container(
+                button::custom(content)
+                    .class(card_style(selected, true))
+                    .padding(padding)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .on_press(()),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(|theme| {
+                let card = cosmic::iced::widget::container::Catalog::style(
+                    theme,
+                    &cosmic::theme::Container::Card,
+                );
+                cosmic::iced::widget::container::Style {
+                    background: card.background,
+                    border: cosmic::iced::Border {
+                        radius: 7.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }
+            }),
+        )
+        .padding([0.0, 4.0, 4.0, 0.0])
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_| cosmic::iced::widget::container::Style {
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.25),
+                offset: Vector::new(0.0, 2.0),
+                blur_radius: 6.0,
+            },
+            ..Default::default()
+        })
+        .into();
+        let state = tree::Tree::new(&icon).state;
+        // libcosmic provides the point inside the card where the drag began. The
+        // drag surface starts with its top-left corner at the cursor, so negate
+        // that point to keep the card under the cursor where it was grabbed.
+        let icon_offset = Vector::new(-offset.x, -offset.y);
+        (icon, state, icon_offset)
+    }
+}
+
 fn detail<'a>(icon: &'static str, label: String) -> Element<'a, Message> {
     widget::row::with_capacity(2)
         .align_y(Alignment::Center)
@@ -412,19 +500,20 @@ fn detail<'a>(icon: &'static str, label: String) -> Element<'a, Message> {
         .into()
 }
 
-fn card_style(selected: bool) -> cosmic::theme::Button {
+fn card_style(selected: bool, lifted: bool) -> cosmic::theme::Button {
     use button::Catalog;
     use cosmic::theme::Button;
 
     fn rectangular(
         style: button::Style,
         highlighted: bool,
+        lifted: bool,
         theme: &cosmic::Theme,
     ) -> button::Style {
         button::Style {
             border_radius: 7.into(),
             border_width: 1.0,
-            border_color: if highlighted {
+            border_color: if highlighted || lifted {
                 theme.cosmic().accent_color().into()
             } else {
                 style.border_color
@@ -438,6 +527,7 @@ fn card_style(selected: bool) -> cosmic::theme::Button {
             rectangular(
                 theme.active(focused, false, &Button::Standard),
                 selected || focused,
+                lifted,
                 theme,
             )
         }),
@@ -445,6 +535,7 @@ fn card_style(selected: bool) -> cosmic::theme::Button {
             rectangular(
                 theme.hovered(focused, false, &Button::Standard),
                 selected || focused,
+                lifted,
                 theme,
             )
         }),
@@ -452,9 +543,12 @@ fn card_style(selected: bool) -> cosmic::theme::Button {
             rectangular(
                 theme.pressed(focused, false, &Button::Standard),
                 selected || focused,
+                lifted,
                 theme,
             )
         }),
-        disabled: Box::new(|theme| rectangular(theme.disabled(&Button::Standard), false, theme)),
+        disabled: Box::new(move |theme| {
+            rectangular(theme.disabled(&Button::Standard), false, lifted, theme)
+        }),
     }
 }

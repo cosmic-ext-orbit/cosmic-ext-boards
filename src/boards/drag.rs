@@ -1,9 +1,9 @@
 use std::{any::Any, borrow::Cow, collections::HashMap};
 
 use cosmic::Element;
-use cosmic::iced::Rectangle;
 use cosmic::iced::clipboard::{dnd::DndAction, mime::AsMimeTypes};
-use cosmic::iced::core::widget::{Operation, operation::Outcome};
+use cosmic::iced::core::widget::{Operation, operation::Outcome, tree};
+use cosmic::iced::{Rectangle, Vector};
 use cosmic::widget::{self, DndDestination, DndSource};
 
 use super::{Board, Id, Message};
@@ -49,11 +49,13 @@ pub(super) fn source<'a>(
     card: Id,
     id: widget::Id,
     child: impl Into<Element<'a, Message>>,
+    icon: impl Fn(Vector) -> (Element<'static, ()>, tree::State, Vector) + 'static,
 ) -> Element<'a, Message> {
     DndSource::with_id(child, id)
         .action(DndAction::Move)
         .drag_content(move || Payload(card))
-        .on_start(Some(Message::DragStarted))
+        .drag_icon(icon)
+        .on_start(Some(Message::DragStarted(card)))
         .on_cancel(Some(Message::DragEnded))
         .on_finish(Some(Message::DragEnded))
         .into()
@@ -89,7 +91,10 @@ pub(super) fn card_bounds(ids: HashMap<Id, widget::Id>) -> impl Operation<HashMa
     }
 
     impl Operation<HashMap<Id, Rectangle>> for Bounds {
-        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<HashMap<Id, Rectangle>>)) {
+        fn traverse(
+            &mut self,
+            operate: &mut dyn FnMut(&mut dyn Operation<HashMap<Id, Rectangle>>),
+        ) {
             operate(self);
         }
 
