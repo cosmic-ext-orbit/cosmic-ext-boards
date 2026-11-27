@@ -119,10 +119,9 @@ impl Page {
             .push_maybe(self.show_filters.then(|| self.filters(board)))
             .push(
                 widget::scrollable(columns)
-                    .direction(scrollable::Direction::Both {
-                        horizontal: scrollable::Scrollbar::default(),
-                        vertical: scrollable::Scrollbar::default(),
-                    })
+                    .direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::default(),
+                    ))
                     .height(Length::Fill),
             )
             .height(Length::Fill)
@@ -366,7 +365,7 @@ impl Page {
                 .push(body),
         )
         .width(248)
-        .height(276)
+        .height(Length::Fill)
         .class(cosmic::theme::Container::Card)
         .into()
     }
