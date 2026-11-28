@@ -1,14 +1,15 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::LazyLock};
 
 use cosmic::Element;
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{self, text};
+use cosmic::widget::{self, Id as WidgetId, text, text_input::StyleSheet};
 
 use super::action;
 
+pub static LABELS_INPUT: LazyLock<WidgetId> = LazyLock::new(WidgetId::unique);
+
 #[derive(Clone, Debug)]
 pub enum Event {
-    Edit(bool),
     Input(String),
     Submit(String),
     Remove(usize),
@@ -23,7 +24,6 @@ pub struct Triggers {
 pub struct Chips {
     values: Vec<String>,
     draft: String,
-    editing: bool,
     triggers: Triggers,
 }
 
@@ -32,15 +32,21 @@ impl Chips {
         Self {
             values,
             draft: String::new(),
-            editing: false,
             triggers,
         }
     }
 
     pub fn update(&mut self, event: Event) {
         match event {
-            Event::Edit(editing) => self.editing = editing,
             Event::Input(value) => {
+                // The text input publishes an empty value when Backspace is
+                // pressed on an empty field. Treat that as removing the last
+                // chip, like a web chip input does.
+                if value.is_empty() && self.draft.is_empty() {
+                    self.values.pop();
+                    return;
+                }
+
                 if let Some((committed, draft)) = value.rsplit_once(self.triggers.separators) {
                     for label in committed.split(self.triggers.separators) {
                         self.insert(label);
@@ -77,69 +83,79 @@ impl Chips {
         }
     }
 
-    pub fn view<'a, Message: Clone + 'static>(
-        &'a self,
+    pub fn view<Message: Clone + 'static>(
+        &self,
         placeholder: String,
-        add_label: String,
         remove_label: impl Fn(&str) -> String,
         on_event: fn(Event) -> Message,
-    ) -> Element<'a, Message> {
+    ) -> Element<'_, Message> {
         let spacing = cosmic::theme::spacing();
-        let input =
-            widget::editable_input(placeholder, &self.draft, self.editing, move |editing| {
-                on_event(Event::Edit(editing))
+        let input = widget::text_input(placeholder, &self.draft)
+            .id(LABELS_INPUT.clone())
+            .style(cosmic::theme::TextInput::EditableText)
+            .width(if self.values.is_empty() {
+                Length::Fill
+            } else {
+                // A `Fill` child in a wrapping row would always take the
+                // whole line, so keep a typing area that follows the chips.
+                Length::Fixed(120.0)
             })
             .padding([0, spacing.space_xxs])
-            .width(Length::Fill)
             .on_input(move |value| on_event(Event::Input(value)));
         let input = if self.triggers.enter {
             input.on_submit(move |value| on_event(Event::Submit(value)))
         } else {
             input
         };
-        let entry = widget::row::with_capacity(2)
-            .width(if self.values.is_empty() {
-                Length::Fill
-            } else {
-                Length::Fixed(168.0)
-            })
-            .spacing(spacing.space_xxs)
-            .align_y(Alignment::Center)
-            .push(input)
-            .push(
-                action("list-add-symbolic", add_label)
-                    .extra_small()
-                    .on_press_maybe(
-                        (!self.draft.trim().is_empty())
-                            .then(|| on_event(Event::Submit(self.draft.clone()))),
-                    ),
-            );
-        let row = self.values.iter().enumerate().fold(
-            widget::row::with_capacity(self.values.len() + 1)
-                .width(Length::Fill)
-                .spacing(spacing.space_xxs)
-                .align_y(Alignment::Center)
-                .push(entry),
-            |row, (index, label)| {
-                row.push(surface(
-                    widget::row::with_capacity(2)
-                        .align_y(Alignment::Center)
-                        .push(text::caption(label))
-                        .push(
-                            action("window-close-symbolic", remove_label(label))
-                                .extra_small()
-                                .padding(2)
-                                .on_press(on_event(Event::Remove(index))),
-                        ),
-                ))
-            },
-        );
-        row.wrap().into()
+
+        let row = self
+            .values
+            .iter()
+            .enumerate()
+            .fold(
+                widget::row::with_capacity(self.values.len() + 1)
+                    .width(Length::Fill)
+                    .spacing(spacing.space_xxs)
+                    .align_y(Alignment::Center),
+                |row, (index, label)| {
+                    row.push(surface(
+                        widget::row::with_capacity(2)
+                            .align_y(Alignment::Center)
+                            .push(text::caption(label))
+                            .push(
+                                action("window-close-symbolic", remove_label(label))
+                                    .extra_small()
+                                    .padding(2)
+                                    .on_press(on_event(Event::Remove(index))),
+                            ),
+                    ))
+                },
+            )
+            .push(input);
+
+        widget::container(row.wrap())
+            .width(Length::Fill)
+            .padding([spacing.space_xxs, spacing.space_xxs])
+            .style(field_style)
+            .into()
     }
 }
 
 pub fn chip<'a, Message: 'a>(label: impl Into<Cow<'a, str>> + 'a) -> Element<'a, Message> {
     surface(text::caption(label))
+}
+
+fn field_style(theme: &cosmic::Theme) -> cosmic::iced::widget::container::Style {
+    let appearance = theme.active(&cosmic::theme::TextInput::Default);
+    cosmic::iced::widget::container::Style {
+        background: Some(appearance.background),
+        border: cosmic::iced::Border {
+            radius: appearance.border_radius,
+            width: appearance.border_width,
+            color: appearance.border_color,
+        },
+        ..Default::default()
+    }
 }
 
 fn surface<'a, Message: 'a>(child: impl Into<Element<'a, Message>>) -> Element<'a, Message> {

@@ -11,7 +11,7 @@ use super::{
 };
 use crate::config::{Density, Preferences};
 use crate::fl;
-use crate::widgets::{action, chips::chip, symbolic_svg};
+use crate::widgets::{action, chips::chip};
 
 impl Page {
     pub fn dialog(&self) -> Option<Element<'_, Message>> {
@@ -107,9 +107,12 @@ impl Page {
             )
             .push(
                 button::standard(fl!("filter"))
-                    .leading_icon(symbolic_svg(include_bytes!(
-                        "../../../resources/icons/filter-symbolic.svg"
-                    )))
+                    .leading_icon(
+                        icon::from_svg_bytes(include_bytes!(
+                            "../../../resources/icons/filter-symbolic.svg"
+                        ))
+                        .symbolic(true),
+                    )
                     .class(card_style(
                         self.show_filters || self.label.is_some() || self.due != DueFilter::All,
                         false,

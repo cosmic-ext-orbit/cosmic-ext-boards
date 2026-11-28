@@ -208,6 +208,9 @@ impl Page {
             Message::SubmitChecklistItem(_) | Message::Calendar(date_input::Event::Select(_)) => {
                 task::effect(Action::widget(focusable::unfocus()))
             }
+            Message::Labels(chips::Event::Submit(_)) if self.editor.is_some() => {
+                text_input::focus(chips::LABELS_INPUT.clone())
+            }
             _ => Task::none(),
         }
     }

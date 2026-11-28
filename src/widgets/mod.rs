@@ -1,6 +1,6 @@
 pub mod chips;
 
-use cosmic::widget::{self, button, icon, text_editor, text_input};
+use cosmic::widget::{button, icon, text_editor, text_input};
 
 pub fn action<'a, Message: Clone + 'static>(
     name: &'static str,
@@ -34,8 +34,4 @@ pub fn editor_style(theme: &cosmic::Theme, status: text_editor::Status) -> text_
             .unwrap_or_else(|| theme.current_container().on.into()),
         selection: appearance.selected_fill,
     }
-}
-
-pub fn symbolic_svg(bytes: &'static [u8]) -> widget::icon::Handle {
-    icon::from_svg_bytes(bytes).symbolic(true)
 }

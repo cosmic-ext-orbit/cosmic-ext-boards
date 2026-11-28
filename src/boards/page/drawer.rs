@@ -5,7 +5,7 @@ use cosmic::widget::{self, TextEditor, button, checkbox, date_input, icon, setti
 
 use super::{Board, Editor, Message, Page};
 use crate::fl;
-use crate::widgets::{action, editor_style, symbolic_svg};
+use crate::widgets::{action, editor_style};
 
 impl Page {
     pub fn drawer<'a>(&'a self, board: &'a Board) -> Option<ContextDrawer<'a, Message>> {
@@ -42,16 +42,17 @@ impl Page {
             .add(
                 settings::item::builder(fl!("status"))
                     .icon(
-                        widget::icon(symbolic_svg(include_bytes!(
+                        icon::from_svg_bytes(include_bytes!(
                             "../../../resources/icons/board-symbolic.svg"
-                        )))
+                        ))
+                        .symbolic(true)
+                        .icon()
                         .size(16),
                     )
                     .control(widget::dropdown(destinations, selected, move |index| {
                         Message::MoveToColumn(id, ids[index])
                     })),
             )
-            // The library date input already includes vertical padding.
             .list_item_padding([0, spacing.space_m])
             .add(due_date(editor));
         let description = settings::section()
@@ -67,7 +68,6 @@ impl Page {
         let labels = settings::section()
             .title(fl!("labels"))
             .add(settings::item_row(vec![editor.labels.view(
-                fl!("add-label"),
                 fl!("add-label"),
                 |label| fl!("remove-label", label = label),
                 Message::Labels,
